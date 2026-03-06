@@ -1,18 +1,43 @@
 import { useEffect, useMemo, useState } from 'react'
 import { supabase } from './supabase'
 
-const STORAGE_KEY = 'eikan-file-manager-v8'
+const STORAGE_KEY = 'eikan-file-manager-v9'
 const APP_STATE_ID = '11111111-1111-1111-1111-111111111111'
 const AUTH_KEY = 'eikan-auth-ok'
 const AUTH_PASSWORD = 'nagata'
 
 const POSITIONS = ['投手', '捕手', '一塁手', '二塁手', '三塁手', '遊撃手', '外野手']
+const TYPE_ORDER = ['投手', '野手']
+const INFIELDER_POSITIONS = ['一塁手', '二塁手', '三塁手', '遊撃手']
+const POSITION_SORT_ORDER = {
+  投手: 0,
+  捕手: 1,
+  一塁手: 2,
+  二塁手: 3,
+  三塁手: 4,
+  遊撃手: 5,
+  外野手: 6,
+}
+
+const POSITION_COLORS = {
+  投手: '#f8b4b4',
+  捕手: '#9de7ef',
+  一塁手: '#ffe37f',
+  二塁手: '#ffe37f',
+  三塁手: '#ffe37f',
+  遊撃手: '#ffe37f',
+  外野手: '#95eb8d',
+}
+
 const ALL_BATTING_FIELDS = ['打率', '打数', '安打', '本塁打', '打点', '得点', '盗塁', '失策', '出塁率', '長打率', 'OPS']
 const ALL_PITCHING_FIELDS = ['防御率', '勝敗S', '投球回', '奪三振率', '与四球率', 'WHIP']
 
 const DEFAULT_SETTINGS = {
   battingSummaryFields: ALL_BATTING_FIELDS,
   pitchingSummaryFields: ALL_PITCHING_FIELDS,
+  visibleGenerations: [],
+  visibleTypes: [...TYPE_ORDER],
+  generationOrder: [],
 }
 
 const MONTHS = (() => {
@@ -37,6 +62,13 @@ const MONTHS = (() => {
 
 function getTypeFromPosition(position) {
   return position === '投手' ? '投手' : '野手'
+}
+
+function getPositionBand(position) {
+  if (position === '投手') return '投手'
+  if (position === '捕手') return '捕手'
+  if (INFIELDER_POSITIONS.includes(position)) return '内野手'
+  return '外野手'
 }
 
 function isNationalMonth(monthObj) {
@@ -84,7 +116,7 @@ function emptyMonthData() {
   }
 }
 
-function createPlayer(name = '新しい選手', generation = '2026', position = '外野手') {
+function createPlayer(name = '新しい選手', generation = '2026世代', position = '外野手') {
   return {
     id: Date.now().toString() + Math.random().toString(16).slice(2),
     name,
@@ -104,6 +136,25 @@ function normalizeMonthData(data) {
   }
 }
 
+function normalizeSettings(rawSettings = {}, players = []) {
+  const merged = { ...DEFAULT_SETTINGS, ...(rawSettings || {}) }
+  const playerGenerations = Array.from(new Set(players.map((p) => p.generation).filter(Boolean)))
+  const baseOrder = Array.isArray(merged.generationOrder) ? merged.generationOrder : []
+  const generationOrder = [...baseOrder.filter((g) => playerGenerations.includes(g))]
+  for (const generation of playerGenerations) {
+    if (!generationOrder.includes(generation)) generationOrder.push(generation)
+  }
+  const visibleGenerations = Array.isArray(merged.visibleGenerations) ? merged.visibleGenerations.filter((g) => generationOrder.includes(g)) : []
+
+  return {
+    battingSummaryFields: Array.isArray(merged.battingSummaryFields) ? merged.battingSummaryFields : ALL_BATTING_FIELDS,
+    pitchingSummaryFields: Array.isArray(merged.pitchingSummaryFields) ? merged.pitchingSummaryFields : ALL_PITCHING_FIELDS,
+    visibleGenerations,
+    visibleTypes: Array.isArray(merged.visibleTypes) && merged.visibleTypes.length > 0 ? merged.visibleTypes.filter((t) => TYPE_ORDER.includes(t)) : [...TYPE_ORDER],
+    generationOrder,
+  }
+}
+
 async function loadData() {
   try {
     const { data, error } = await supabase
@@ -114,27 +165,30 @@ async function loadData() {
 
     if (!error && data?.data) {
       const parsed = data.data
+      const players = Array.isArray(parsed.players) ? parsed.players : [createPlayer()]
       return {
-        players: Array.isArray(parsed.players) ? parsed.players : [createPlayer()],
-        settings: { ...DEFAULT_SETTINGS, ...(parsed.settings || {}) },
+        players,
+        settings: normalizeSettings(parsed.settings || {}, players),
       }
     }
 
     const raw = localStorage.getItem(STORAGE_KEY)
     if (!raw) {
+      const players = [
+        createPlayer('エース候補', '2026世代', '投手'),
+        createPlayer('主砲候補', '2026世代', '外野手'),
+      ]
       return {
-        players: [
-          createPlayer('エース候補', '2026', '投手'),
-          createPlayer('主砲候補', '2026', '外野手'),
-        ],
-        settings: DEFAULT_SETTINGS,
+        players,
+        settings: normalizeSettings(DEFAULT_SETTINGS, players),
       }
     }
 
     const parsed = JSON.parse(raw)
+    const players = Array.isArray(parsed.players) ? parsed.players : [createPlayer()]
     return {
-      players: Array.isArray(parsed.players) ? parsed.players : [createPlayer()],
-      settings: { ...DEFAULT_SETTINGS, ...(parsed.settings || {}) },
+      players,
+      settings: normalizeSettings(parsed.settings || {}, players),
     }
   } catch (e) {
     console.error('Supabase load error:', e)
@@ -142,16 +196,18 @@ async function loadData() {
       const raw = localStorage.getItem(STORAGE_KEY)
       if (raw) {
         const parsed = JSON.parse(raw)
+        const players = Array.isArray(parsed.players) ? parsed.players : [createPlayer()]
         return {
-          players: Array.isArray(parsed.players) ? parsed.players : [createPlayer()],
-          settings: { ...DEFAULT_SETTINGS, ...(parsed.settings || {}) },
+          players,
+          settings: normalizeSettings(parsed.settings || {}, players),
         }
       }
     } catch {}
 
+    const players = [createPlayer()]
     return {
-      players: [createPlayer()],
-      settings: DEFAULT_SETTINGS,
+      players,
+      settings: normalizeSettings(DEFAULT_SETTINGS, players),
     }
   }
 }
@@ -342,17 +398,31 @@ function MiniCheckField({ label, checked, onChange }) {
   )
 }
 
+function sortPlayersForTree(players) {
+  return [...players].sort((a, b) => {
+    const orderA = POSITION_SORT_ORDER[a.position] ?? 99
+    const orderB = POSITION_SORT_ORDER[b.position] ?? 99
+    if (orderA !== orderB) return orderA - orderB
+    return a.name.localeCompare(b.name, 'ja')
+  })
+}
+
 export default function App() {
   const [players, setPlayers] = useState([])
   const [settings, setSettings] = useState(DEFAULT_SETTINGS)
   const [selectedPlayerId, setSelectedPlayerId] = useState('')
   const [monthIndex, setMonthIndex] = useState(0)
-  const [generationFilter, setGenerationFilter] = useState('すべて')
-  const [typeFilter, setTypeFilter] = useState('すべて')
   const [searchText, setSearchText] = useState('')
   const [mode, setMode] = useState('main')
   const [passwordInput, setPasswordInput] = useState('')
   const [isUnlocked, setIsUnlocked] = useState(() => localStorage.getItem(AUTH_KEY) === 'ok')
+  const [expandedGenerations, setExpandedGenerations] = useState({})
+  const [expandedTypes, setExpandedTypes] = useState({})
+  const [openSettingsSections, setOpenSettingsSections] = useState({
+    display: true,
+    generations: true,
+    summary: false,
+  })
 
   useEffect(() => {
     async function init() {
@@ -363,6 +433,36 @@ export default function App() {
     }
     init()
   }, [])
+
+  useEffect(() => {
+    const playerGenerations = Array.from(new Set(players.map((p) => p.generation).filter(Boolean)))
+
+    setSettings((prev) => {
+      const nextOrder = [...(Array.isArray(prev.generationOrder) ? prev.generationOrder : [])]
+      for (const generation of playerGenerations) {
+        if (!nextOrder.includes(generation)) nextOrder.push(generation)
+      }
+
+      const cleanedOrder = nextOrder.filter((generation) => playerGenerations.includes(generation) || generation.trim() !== '')
+      const nextVisibleGenerations = [...(Array.isArray(prev.visibleGenerations) ? prev.visibleGenerations : [])]
+      for (const generation of cleanedOrder) {
+        if (!nextVisibleGenerations.includes(generation)) nextVisibleGenerations.push(generation)
+      }
+      const cleanedVisibleGenerations = nextVisibleGenerations.filter((generation) => cleanedOrder.includes(generation))
+
+      const changed =
+        JSON.stringify(cleanedOrder) !== JSON.stringify(prev.generationOrder) ||
+        JSON.stringify(cleanedVisibleGenerations) !== JSON.stringify(prev.visibleGenerations)
+
+      if (!changed) return prev
+
+      return {
+        ...prev,
+        generationOrder: cleanedOrder,
+        visibleGenerations: cleanedVisibleGenerations,
+      }
+    })
+  }, [players])
 
   useEffect(() => {
     if (players.length === 0) return
@@ -377,25 +477,40 @@ export default function App() {
 
       if (error) {
         console.error('Supabase save error:', error)
-      } else {
-        console.log('Supabase save success')
       }
     }
 
     saveToSupabase()
   }, [players, settings])
 
-  const generations = useMemo(() => ['すべて', ...Array.from(new Set(players.map((p) => p.generation)))], [players])
+  const generationOrder = useMemo(() => {
+    const fromPlayers = Array.from(new Set(players.map((p) => p.generation).filter(Boolean)))
+    const ordered = [...(settings.generationOrder || []).filter((g) => fromPlayers.includes(g))]
+    for (const generation of fromPlayers) {
+      if (!ordered.includes(generation)) ordered.push(generation)
+    }
+    return ordered
+  }, [players, settings.generationOrder])
+
+  const effectiveVisibleGenerations = useMemo(() => {
+    if (!settings.visibleGenerations || settings.visibleGenerations.length === 0) return generationOrder
+    return generationOrder.filter((generation) => settings.visibleGenerations.includes(generation))
+  }, [generationOrder, settings.visibleGenerations])
+
+  const effectiveVisibleTypes = useMemo(() => {
+    if (!settings.visibleTypes || settings.visibleTypes.length === 0) return TYPE_ORDER
+    return TYPE_ORDER.filter((type) => settings.visibleTypes.includes(type))
+  }, [settings.visibleTypes])
 
   const filteredPlayers = useMemo(() => {
+    const keyword = searchText.trim().toLowerCase()
     return players.filter((p) => {
-      const okGeneration = generationFilter === 'すべて' || p.generation === generationFilter
-      const okType = typeFilter === 'すべて' || getTypeFromPosition(p.position) === typeFilter
-      const keyword = searchText.trim().toLowerCase()
+      const okGeneration = effectiveVisibleGenerations.includes(p.generation)
+      const okType = effectiveVisibleTypes.includes(getTypeFromPosition(p.position))
       const okSearch = keyword === '' || p.name.toLowerCase().includes(keyword) || (p.tags || '').toLowerCase().includes(keyword)
       return okGeneration && okType && okSearch
     })
-  }, [players, generationFilter, typeFilter, searchText])
+  }, [players, effectiveVisibleGenerations, effectiveVisibleTypes, searchText])
 
   const selectedPlayer = players.find((p) => p.id === selectedPlayerId) || players[0] || null
   const playerType = selectedPlayer ? getTypeFromPosition(selectedPlayer.position) : '野手'
@@ -469,14 +584,34 @@ export default function App() {
     }))
   }
 
-  function addPlayer(type) {
-    const name = window.prompt('選手名を入力してください', type === '投手' ? '新しい投手' : '新しい野手')
+  function addGeneration() {
+    const name = window.prompt('世代名を入力してください', '新しい世代')?.trim()
     if (!name) return
-    const generation = window.prompt('世代を入力してください', '2026') || '2026'
-    const defaultPosition = type === '投手' ? '投手' : '外野手'
-    const newPlayer = createPlayer(name, generation, defaultPosition)
+    if (generationOrder.includes(name)) {
+      alert('同じ世代名があります')
+      return
+    }
+    setSettings((prev) => ({
+      ...prev,
+      generationOrder: [...generationOrder, name],
+      visibleGenerations: [...(prev.visibleGenerations || []), name],
+    }))
+    setExpandedGenerations((prev) => ({ ...prev, [name]: true }))
+  }
+
+  function addPlayerToGeneration(generation) {
+    const name = window.prompt('選手名を入力してください', '')?.trim()
+    if (!name) return
+    const positionInput = window.prompt(`ポジションを入力してください（${POSITIONS.join(' / ')}）`, '投手')?.trim()
+    if (!positionInput || !POSITIONS.includes(positionInput)) {
+      alert('ポジションが正しくありません')
+      return
+    }
+    const newPlayer = createPlayer(name, generation, positionInput)
     setPlayers((prev) => [...prev, newPlayer])
     setSelectedPlayerId(newPlayer.id)
+    setExpandedGenerations((prev) => ({ ...prev, [generation]: true }))
+    setExpandedTypes((prev) => ({ ...prev, [`${generation}-${getTypeFromPosition(positionInput)}`]: true }))
     setMode('main')
   }
 
@@ -494,16 +629,6 @@ export default function App() {
     const reader = new FileReader()
     reader.onload = () => updateMonthData(selectedPlayer.id, currentMonth.id, { [key]: reader.result })
     reader.readAsDataURL(file)
-  }
-
-  function groupedPlayers() {
-    const result = {}
-    for (const p of filteredPlayers) {
-      const type = getTypeFromPosition(p.position)
-      if (!result[p.generation]) result[p.generation] = { 投手: [], 野手: [] }
-      result[p.generation][type].push(p)
-    }
-    return result
   }
 
   function updateBattingGame(index, key, value) {
@@ -543,6 +668,93 @@ export default function App() {
     }))
   }
 
+  function toggleGenerationVisibility(generation) {
+    setSettings((prev) => {
+      const current = prev.visibleGenerations || []
+      const exists = current.includes(generation)
+      return {
+        ...prev,
+        visibleGenerations: exists ? current.filter((g) => g !== generation) : [...current, generation],
+      }
+    })
+  }
+
+  function toggleTypeVisibility(type) {
+    setSettings((prev) => {
+      const current = prev.visibleTypes || []
+      const exists = current.includes(type)
+      return {
+        ...prev,
+        visibleTypes: exists ? current.filter((t) => t !== type) : [...current, type],
+      }
+    })
+  }
+
+  function renameGeneration(oldGeneration, nextGenerationRaw) {
+    const nextGeneration = nextGenerationRaw.trim()
+    if (!nextGeneration || nextGeneration === oldGeneration) return
+    if (generationOrder.includes(nextGeneration)) {
+      alert('同じ世代名があります')
+      return
+    }
+
+    setPlayers((prev) => prev.map((player) => (
+      player.generation === oldGeneration ? { ...player, generation: nextGeneration } : player
+    )))
+
+    setSettings((prev) => ({
+      ...prev,
+      generationOrder: (prev.generationOrder || []).map((generation) => generation === oldGeneration ? nextGeneration : generation),
+      visibleGenerations: (prev.visibleGenerations || []).map((generation) => generation === oldGeneration ? nextGeneration : generation),
+    }))
+
+    setExpandedGenerations((prev) => {
+      const next = { ...prev }
+      if (oldGeneration in next) {
+        next[nextGeneration] = next[oldGeneration]
+        delete next[oldGeneration]
+      }
+      return next
+    })
+
+    setExpandedTypes((prev) => {
+      const next = {}
+      Object.entries(prev).forEach(([key, value]) => {
+        if (key.startsWith(`${oldGeneration}-`)) {
+          next[key.replace(`${oldGeneration}-`, `${nextGeneration}-`)] = value
+        } else {
+          next[key] = value
+        }
+      })
+      return next
+    })
+  }
+
+  function moveGeneration(generation, direction) {
+    const index = generationOrder.indexOf(generation)
+    if (index < 0) return
+    const target = direction === 'up' ? index - 1 : index + 1
+    if (target < 0 || target >= generationOrder.length) return
+    const nextOrder = [...generationOrder]
+    const temp = nextOrder[index]
+    nextOrder[index] = nextOrder[target]
+    nextOrder[target] = temp
+    setSettings((prev) => ({ ...prev, generationOrder: nextOrder }))
+  }
+
+  function toggleGenerationOpen(generation) {
+    setExpandedGenerations((prev) => ({ ...prev, [generation]: !prev[generation] }))
+  }
+
+  function toggleTypeOpen(generation, type) {
+    const key = `${generation}-${type}`
+    setExpandedTypes((prev) => ({ ...prev, [key]: !prev[key] }))
+  }
+
+  function toggleSettingsSection(key) {
+    setOpenSettingsSections((prev) => ({ ...prev, [key]: !prev[key] }))
+  }
+
   function exportBackup() {
     const data = { players, settings }
     const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' })
@@ -560,8 +772,9 @@ export default function App() {
     reader.onload = (e) => {
       try {
         const data = JSON.parse(e.target?.result)
-        if (data.players) setPlayers(data.players)
-        if (data.settings) setSettings(data.settings)
+        const nextPlayers = Array.isArray(data.players) ? data.players : []
+        setPlayers(nextPlayers)
+        setSettings(normalizeSettings(data.settings || {}, nextPlayers))
         alert('バックアップ読み込み成功')
       } catch {
         alert('バックアップファイルが不正です')
@@ -569,8 +782,6 @@ export default function App() {
     }
     reader.readAsText(file)
   }
-
-  const groups = groupedPlayers()
 
   function handleUnlock() {
     if (passwordInput === AUTH_PASSWORD) {
@@ -586,6 +797,22 @@ export default function App() {
     localStorage.removeItem(AUTH_KEY)
     setIsUnlocked(false)
   }
+
+  const treeData = useMemo(() => {
+    const map = {}
+    for (const generation of effectiveVisibleGenerations) {
+      map[generation] = { 投手: [], 野手: [] }
+    }
+    for (const player of filteredPlayers) {
+      if (!map[player.generation]) map[player.generation] = { 投手: [], 野手: [] }
+      map[player.generation][getTypeFromPosition(player.position)].push(player)
+    }
+    for (const generation of Object.keys(map)) {
+      map[generation].投手 = sortPlayersForTree(map[generation].投手)
+      map[generation].野手 = sortPlayersForTree(map[generation].野手)
+    }
+    return map
+  }, [filteredPlayers, effectiveVisibleGenerations])
 
   if (!isUnlocked) {
     return (
@@ -619,67 +846,76 @@ export default function App() {
           <div style={styles.modeRow}>
             <button style={{ ...styles.modeButton, ...(mode === 'main' ? styles.activeModeButton : {}) }} onClick={() => setMode('main')}>通常</button>
             <button style={{ ...styles.modeButton, ...(mode === 'settings' ? styles.activeModeButton : {}) }} onClick={() => setMode('settings')}>設定</button>
+            <button style={styles.modeButton} onClick={exportBackup}>バックアップ保存</button>
+          </div>
+          <div style={styles.backupRow}>
+            <input type="file" accept=".json" onChange={(e) => importBackup(e.target.files?.[0])} />
+          </div>
+          <div style={styles.searchRow}>
+            <input style={styles.input} value={searchText} onChange={(e) => setSearchText(e.target.value)} placeholder="名前・タグ検索" />
           </div>
         </div>
 
-        <div style={styles.filterBox}>
-          <select value={generationFilter} onChange={(e) => setGenerationFilter(e.target.value)} style={styles.input}>
-            {generations.map((g) => <option key={g} value={g}>{g}</option>)}
-          </select>
-          <select value={typeFilter} onChange={(e) => setTypeFilter(e.target.value)} style={styles.input}>
-            <option value="すべて">すべて</option>
-            <option value="投手">投手</option>
-            <option value="野手">野手</option>
-          </select>
-          <input style={styles.input} value={searchText} onChange={(e) => setSearchText(e.target.value)} placeholder="名前・タグ検索" />
-        </div>
-
-        <div style={styles.buttonRow}>
-          <button onClick={() => addPlayer('投手')} style={styles.button}>投手追加</button>
-          <button onClick={() => addPlayer('野手')} style={styles.button}>野手追加</button>
-        </div>
-
-        <div style={styles.buttonRow}>
-          <button style={styles.button} onClick={exportBackup}>バックアップ保存</button>
-          <input
-            type="file"
-            accept=".json"
-            onChange={(e) => importBackup(e.target.files?.[0])}
-          />
-        </div>
-
         <div style={styles.treeArea}>
-          {Object.keys(groups).length === 0 ? (
-            <div>選手がいません</div>
+          {effectiveVisibleGenerations.length === 0 ? (
+            <div style={styles.emptyText}>表示対象の世代がありません</div>
           ) : (
-            Object.keys(groups).sort().map((generation) => (
-              <div key={generation} style={{ marginBottom: 16 }}>
-                <div style={styles.folder}>{generation}世代</div>
-                {['投手', '野手'].map((type) => (
-                  <div key={type} style={{ marginLeft: 12, marginTop: 6 }}>
-                    <div style={styles.subFolder}>{type}</div>
-                    <div style={{ marginLeft: 12 }}>
-                      {groups[generation][type].length === 0 ? (
-                        <div style={styles.emptyText}>なし</div>
-                      ) : (
-                        groups[generation][type].map((player) => (
-                          <button
-                            key={player.id}
-                            onClick={() => {
-                              setSelectedPlayerId(player.id)
-                              setMode('main')
-                            }}
-                            style={{ ...styles.playerButton, backgroundColor: player.id === selectedPlayerId ? '#dbeafe' : 'white' }}
-                          >
-                            {player.name}
-                          </button>
-                        ))
-                      )}
-                    </div>
+            effectiveVisibleGenerations.map((generation) => {
+              const isGenerationOpen = !!expandedGenerations[generation]
+              return (
+                <div key={generation} style={styles.treeGenerationWrap}>
+                  <div style={styles.treeGenerationRow}>
+                    <button style={styles.treeToggleButton} onClick={() => toggleGenerationOpen(generation)}>
+                      {isGenerationOpen ? '▾' : '▸'}
+                    </button>
+                    <button style={styles.generationLabelButton} onClick={() => toggleGenerationOpen(generation)}>
+                      {generation}
+                    </button>
+                    <button style={styles.addInlineButton} onClick={() => addPlayerToGeneration(generation)}>＋</button>
                   </div>
-                ))}
-              </div>
-            ))
+
+                  {isGenerationOpen && TYPE_ORDER.filter((type) => effectiveVisibleTypes.includes(type)).map((type) => {
+                    const key = `${generation}-${type}`
+                    const isTypeOpen = !!expandedTypes[key]
+                    const playersInType = treeData[generation]?.[type] || []
+                    return (
+                      <div key={key} style={styles.treeTypeWrap}>
+                        <div style={styles.treeTypeRow}>
+                          <button style={styles.treeToggleButton} onClick={() => toggleTypeOpen(generation, type)}>
+                            {isTypeOpen ? '▾' : '▸'}
+                          </button>
+                          <button style={styles.typeLabelButton} onClick={() => toggleTypeOpen(generation, type)}>
+                            {type}
+                          </button>
+                        </div>
+                        {isTypeOpen && (
+                          <div style={styles.treePlayersWrap}>
+                            {playersInType.length === 0 ? (
+                              <div style={styles.emptyText}>なし</div>
+                            ) : playersInType.map((player) => (
+                              <button
+                                key={player.id}
+                                onClick={() => {
+                                  setSelectedPlayerId(player.id)
+                                  setMode('main')
+                                }}
+                                style={{
+                                  ...styles.playerButton,
+                                  backgroundColor: player.id === selectedPlayerId ? '#dbeafe' : POSITION_COLORS[player.position] || 'white',
+                                  borderColor: player.id === selectedPlayerId ? '#60a5fa' : 'rgba(0,0,0,0.06)',
+                                }}
+                              >
+                                {player.name}
+                              </button>
+                            ))}
+                          </div>
+                        )}
+                      </div>
+                    )
+                  })}
+                </div>
+              )
+            })
           )}
         </div>
       </div>
@@ -688,38 +924,111 @@ export default function App() {
         {mode === 'settings' ? (
           <div style={styles.settingsWrap}>
             <div style={styles.card}>
-              <h2 style={styles.sectionTitle}>表示設定</h2>
-              <div style={styles.settingSection}>
-                <div style={styles.settingTitle}>野手サマリーに表示する項目</div>
-                <div style={styles.checkboxGrid}>
-                  {ALL_BATTING_FIELDS.map((field) => (
-                    <label key={field} style={styles.checkboxLabel}>
-                      <input
-                        type="checkbox"
-                        checked={settings.battingSummaryFields.includes(field)}
-                        onChange={() => toggleSummaryField('battingSummaryFields', field)}
-                      />
-                      <span>{field}</span>
-                    </label>
-                  ))}
-                </div>
-              </div>
+              <button style={styles.sectionToggleButton} onClick={() => toggleSettingsSection('display')}>
+                {openSettingsSections.display ? '▾' : '▸'} 表示対象設定
+              </button>
+              {openSettingsSections.display && (
+                <div style={styles.settingBlock}>
+                  <div style={styles.settingTitle}>世代</div>
+                  <div style={styles.checkboxGridCompact}>
+                    {generationOrder.map((generation) => (
+                      <label key={generation} style={styles.checkboxLabel}>
+                        <input
+                          type="checkbox"
+                          checked={effectiveVisibleGenerations.includes(generation)}
+                          onChange={() => toggleGenerationVisibility(generation)}
+                        />
+                        <span>{generation}</span>
+                      </label>
+                    ))}
+                  </div>
 
-              <div style={styles.settingSection}>
-                <div style={styles.settingTitle}>投手サマリーに表示する項目</div>
-                <div style={styles.checkboxGrid}>
-                  {ALL_PITCHING_FIELDS.map((field) => (
-                    <label key={field} style={styles.checkboxLabel}>
-                      <input
-                        type="checkbox"
-                        checked={settings.pitchingSummaryFields.includes(field)}
-                        onChange={() => toggleSummaryField('pitchingSummaryFields', field)}
-                      />
-                      <span>{field}</span>
-                    </label>
-                  ))}
+                  <div style={styles.settingTitle}>投手・野手</div>
+                  <div style={styles.checkboxGridCompact}>
+                    {TYPE_ORDER.map((type) => (
+                      <label key={type} style={styles.checkboxLabel}>
+                        <input
+                          type="checkbox"
+                          checked={effectiveVisibleTypes.includes(type)}
+                          onChange={() => toggleTypeVisibility(type)}
+                        />
+                        <span>{type}</span>
+                      </label>
+                    ))}
+                  </div>
                 </div>
-              </div>
+              )}
+            </div>
+
+            <div style={styles.card}>
+              <button style={styles.sectionToggleButton} onClick={() => toggleSettingsSection('generations')}>
+                {openSettingsSections.generations ? '▾' : '▸'} 世代設定
+              </button>
+              {openSettingsSections.generations && (
+                <div style={styles.settingBlock}>
+                  <div style={styles.buttonRow}>
+                    <button style={styles.button} onClick={addGeneration}>世代追加</button>
+                  </div>
+                  <div style={styles.generationSettingList}>
+                    {generationOrder.map((generation, index) => (
+                      <div key={generation} style={styles.generationSettingRow}>
+                        <input
+                          style={styles.smallInput}
+                          defaultValue={generation}
+                          onBlur={(e) => renameGeneration(generation, e.target.value)}
+                          onKeyDown={(e) => {
+                            if (e.key === 'Enter') {
+                              renameGeneration(generation, e.currentTarget.value)
+                              e.currentTarget.blur()
+                            }
+                          }}
+                        />
+                        <div style={styles.generationOrderButtons}>
+                          <button style={styles.smallSquareButton} disabled={index === 0} onClick={() => moveGeneration(generation, 'up')}>↑</button>
+                          <button style={styles.smallSquareButton} disabled={index === generationOrder.length - 1} onClick={() => moveGeneration(generation, 'down')}>↓</button>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+            </div>
+
+            <div style={styles.card}>
+              <button style={styles.sectionToggleButton} onClick={() => toggleSettingsSection('summary')}>
+                {openSettingsSections.summary ? '▾' : '▸'} サマリー表示設定
+              </button>
+              {openSettingsSections.summary && (
+                <div style={styles.settingBlock}>
+                  <div style={styles.settingTitle}>野手サマリーに表示する項目</div>
+                  <div style={styles.checkboxGrid}>
+                    {ALL_BATTING_FIELDS.map((field) => (
+                      <label key={field} style={styles.checkboxLabel}>
+                        <input
+                          type="checkbox"
+                          checked={settings.battingSummaryFields.includes(field)}
+                          onChange={() => toggleSummaryField('battingSummaryFields', field)}
+                        />
+                        <span>{field}</span>
+                      </label>
+                    ))}
+                  </div>
+
+                  <div style={styles.settingTitle}>投手サマリーに表示する項目</div>
+                  <div style={styles.checkboxGrid}>
+                    {ALL_PITCHING_FIELDS.map((field) => (
+                      <label key={field} style={styles.checkboxLabel}>
+                        <input
+                          type="checkbox"
+                          checked={settings.pitchingSummaryFields.includes(field)}
+                          onChange={() => toggleSummaryField('pitchingSummaryFields', field)}
+                        />
+                        <span>{field}</span>
+                      </label>
+                    ))}
+                  </div>
+                </div>
+              )}
             </div>
           </div>
         ) : !selectedPlayer ? (
@@ -730,7 +1039,7 @@ export default function App() {
               <div style={styles.headerMainRow}>
                 <div>
                   <h2 style={{ margin: 0 }}>{selectedPlayer.name}</h2>
-                  <div style={styles.metaText}>{selectedPlayer.generation}世代 / {selectedPlayer.position}</div>
+                  <div style={styles.metaText}>{selectedPlayer.generation} / {selectedPlayer.position}</div>
                 </div>
                 <div style={styles.headerStatsGrid}>
                   <div style={styles.headerStatsBox}>
@@ -779,7 +1088,9 @@ export default function App() {
                 </div>
                 <div style={styles.compactField}>
                   <div style={styles.label}>世代</div>
-                  <input style={styles.smallInput} value={selectedPlayer.generation} onChange={(e) => updatePlayer(selectedPlayer.id, { generation: e.target.value })} />
+                  <select style={styles.smallInput} value={selectedPlayer.generation} onChange={(e) => updatePlayer(selectedPlayer.id, { generation: e.target.value })}>
+                    {generationOrder.map((generation) => <option key={generation} value={generation}>{generation}</option>)}
+                  </select>
                 </div>
                 <div style={styles.compactField}>
                   <div style={styles.label}>ポジション</div>
@@ -1035,6 +1346,14 @@ const styles = {
   modeRow: {
     display: 'flex',
     gap: 8,
+    flexWrap: 'wrap',
+  },
+  backupRow: {
+    marginTop: 8,
+    marginBottom: 10,
+  },
+  searchRow: {
+    marginBottom: 12,
   },
   modeButton: {
     padding: '8px 12px',
@@ -1044,11 +1363,6 @@ const styles = {
     cursor: 'pointer'
   },
   activeModeButton: { backgroundColor: '#dbeafe' },
-  filterBox: {
-    display: 'grid',
-    gap: 8,
-    marginBottom: 12
-  },
   input: {
     width: '100%',
     padding: 8,
@@ -1078,27 +1392,80 @@ const styles = {
     cursor: 'pointer'
   },
   treeArea: {
-    maxHeight: 'calc(100vh - 240px)',
+    maxHeight: 'calc(100vh - 220px)',
     overflowY: 'auto',
     paddingRight: 4
   },
-  folder: {
-    fontWeight: 'bold',
-    fontSize: 18
+  treeGenerationWrap: {
+    marginBottom: 8,
   },
-  subFolder: {
+  treeGenerationRow: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: 6,
+  },
+  treeTypeWrap: {
+    marginLeft: 18,
+    marginTop: 6,
+  },
+  treeTypeRow: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: 6,
+  },
+  treePlayersWrap: {
+    marginLeft: 18,
+    marginTop: 4,
+    display: 'grid',
+    gap: 4,
+  },
+  treeToggleButton: {
+    border: 'none',
+    backgroundColor: 'transparent',
+    cursor: 'pointer',
+    width: 22,
+    padding: 0,
+    fontSize: 16,
+  },
+  generationLabelButton: {
+    border: 'none',
+    backgroundColor: 'transparent',
+    cursor: 'pointer',
+    padding: '4px 0',
     fontWeight: 'bold',
-    color: '#374151'
+    fontSize: 18,
+    flex: 1,
+    textAlign: 'left',
+  },
+  typeLabelButton: {
+    border: 'none',
+    backgroundColor: 'transparent',
+    cursor: 'pointer',
+    padding: '3px 0',
+    fontWeight: 'bold',
+    color: '#374151',
+    flex: 1,
+    textAlign: 'left',
+  },
+  addInlineButton: {
+    width: 28,
+    height: 28,
+    borderRadius: 999,
+    border: '1px solid #cbd5e1',
+    backgroundColor: 'white',
+    cursor: 'pointer',
+    fontSize: 18,
+    lineHeight: 1,
   },
   playerButton: {
     display: 'block',
     width: '100%',
     textAlign: 'left',
-    padding: '6px 8px',
+    padding: '7px 10px',
     borderRadius: 8,
     border: '1px solid #e5e7eb',
     cursor: 'pointer',
-    marginTop: 4
+    fontWeight: 'bold',
   },
   emptyText: {
     color: '#9ca3af',
@@ -1179,7 +1546,7 @@ const styles = {
   },
   compactInfoRow: {
     display: 'grid',
-    gridTemplateColumns: '2fr 0.8fr 1fr 1fr',
+    gridTemplateColumns: '2fr 1fr 1fr 1fr',
     gap: 8,
     alignItems: 'end',
   },
@@ -1330,17 +1697,33 @@ const styles = {
   settingsWrap: {
     maxWidth: 1000,
   },
-  settingSection: {
-    marginTop: 24,
+  sectionToggleButton: {
+    width: '100%',
+    textAlign: 'left',
+    padding: '4px 0 8px',
+    border: 'none',
+    backgroundColor: 'transparent',
+    fontWeight: 'bold',
+    fontSize: 18,
+    cursor: 'pointer',
+  },
+  settingBlock: {
+    marginTop: 8,
   },
   settingTitle: {
     fontWeight: 'bold',
-    marginBottom: 12,
-    fontSize: 18,
+    marginTop: 14,
+    marginBottom: 8,
+    fontSize: 16,
   },
   checkboxGrid: {
     display: 'grid',
     gridTemplateColumns: 'repeat(4, minmax(0, 1fr))',
+    gap: 10,
+  },
+  checkboxGridCompact: {
+    display: 'grid',
+    gridTemplateColumns: 'repeat(3, minmax(0, 1fr))',
     gap: 10,
   },
   checkboxLabel: {
@@ -1351,5 +1734,27 @@ const styles = {
     border: '1px solid #e5e7eb',
     borderRadius: 10,
     backgroundColor: '#fafafa',
+  },
+  generationSettingList: {
+    display: 'grid',
+    gap: 8,
+  },
+  generationSettingRow: {
+    display: 'grid',
+    gridTemplateColumns: '1fr auto',
+    gap: 8,
+    alignItems: 'center',
+  },
+  generationOrderButtons: {
+    display: 'flex',
+    gap: 6,
+  },
+  smallSquareButton: {
+    width: 34,
+    height: 34,
+    borderRadius: 8,
+    border: '1px solid #cbd5e1',
+    backgroundColor: 'white',
+    cursor: 'pointer',
   },
 }
