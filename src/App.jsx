@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import { supabase } from './supabase'
 
-const STORAGE_KEY = 'eikan-file-manager-v9'
+const STORAGE_KEY = 'eikan-file-manager-v10'
 const APP_STATE_ID = '11111111-1111-1111-1111-111111111111'
 const AUTH_KEY = 'eikan-auth-ok'
 const AUTH_PASSWORD = 'nagata'
@@ -18,15 +18,14 @@ const POSITION_SORT_ORDER = {
   遊撃手: 5,
   外野手: 6,
 }
-
 const POSITION_COLORS = {
-  投手: '#f8b4b4',
-  捕手: '#9de7ef',
-  一塁手: '#ffe37f',
-  二塁手: '#ffe37f',
-  三塁手: '#ffe37f',
-  遊撃手: '#ffe37f',
-  外野手: '#95eb8d',
+  投手: '#f6b1b1',
+  捕手: '#96e7ef',
+  一塁手: '#ffe37a',
+  二塁手: '#ffe37a',
+  三塁手: '#ffe37a',
+  遊撃手: '#ffe37a',
+  外野手: '#94e98d',
 }
 
 const ALL_BATTING_FIELDS = ['打率', '打数', '安打', '本塁打', '打点', '得点', '盗塁', '失策', '出塁率', '長打率', 'OPS']
@@ -40,48 +39,27 @@ const DEFAULT_SETTINGS = {
   generationOrder: [],
 }
 
-const MONTHS = (() => {
-  const arr = []
-  const schoolOrder =[
-  { id: "1-in", label: "1年 入学式" },
-  { id: "1-summer", label: "1年 夏大会前" },
-  { id: "1-autumn", label: "1年 秋大会前" },
-  { id: "1-spring", label: "1年 春大会前" },
-
-  { id: "2-in", label: "2年 入学式" },
-  { id: "2-summer", label: "2年 夏大会前" },
-  { id: "2-autumn", label: "2年 秋大会前" },
-  { id: "2-spring", label: "2年 春大会前" },
-
-  { id: "3-in", label: "3年 入学式" },
-  { id: "3-summer", label: "3年 夏大会前" },
-
-  { id: "graduation", label: "卒業時" }
+const MONTHS = [
+  { id: '1-in', label: '1年 入学式', short: '入', grade: 1 },
+  { id: '1-summer', label: '1年 夏前', short: '夏前', grade: 1 },
+  { id: '1-autumn', label: '1年 秋前', short: '秋前', grade: 1 },
+  { id: '1-spring', label: '1年 春前', short: '春前', grade: 1 },
+  { id: '2-in', label: '2年 入学式', short: '入', grade: 2 },
+  { id: '2-summer', label: '2年 夏前', short: '夏前', grade: 2 },
+  { id: '2-autumn', label: '2年 秋前', short: '秋前', grade: 2 },
+  { id: '2-spring', label: '2年 春前', short: '春前', grade: 2 },
+  { id: '3-in', label: '3年 入学式', short: '入', grade: 3 },
+  { id: '3-summer', label: '3年 夏前', short: '夏前', grade: 3 },
+  { id: 'graduation', label: '卒業時', short: '卒', grade: 3 },
 ]
-
-  for (const block of schoolOrder) {
-    for (let month = block.start; month <= block.end; month++) {
-      arr.push({ id: `${block.grade}-${month}`, label: `${block.grade}年${month}月`, grade: block.grade, month })
-    }
-  }
-
-  arr.push({ id: 'graduation', label: '卒業時', grade: 3, month: 8.5 })
-  return arr
-})()
 
 function getTypeFromPosition(position) {
   return position === '投手' ? '投手' : '野手'
 }
 
-function getPositionBand(position) {
-  if (position === '投手') return '投手'
-  if (position === '捕手') return '捕手'
-  if (INFIELDER_POSITIONS.includes(position)) return '内野手'
-  return '外野手'
-}
-
 function isNationalMonth(monthObj) {
-  return monthObj && [8, 11, 3].includes(monthObj.month)
+  if (!monthObj) return false
+  return ['1-summer', '1-autumn', '1-spring', '2-summer', '2-autumn', '2-spring', '3-summer'].includes(monthObj.id)
 }
 
 function emptyBattingGame() {
@@ -116,7 +94,7 @@ function emptyPitchingGame() {
   }
 }
 
-function emptyMonthData() {
+function emptyPeriodData() {
   return {
     image: '',
     subImage: '',
@@ -132,16 +110,23 @@ function createPlayer(name = '新しい選手', generation = '2026世代', posit
     generation,
     position,
     tags: '',
-    months: {},
+    periods: {},
   }
 }
 
-function normalizeMonthData(data) {
+function normalizePeriodData(data) {
   return {
-    ...emptyMonthData(),
+    ...emptyPeriodData(),
     ...(data || {}),
     battingGames: Array.isArray(data?.battingGames) ? data.battingGames : [],
     pitchingGames: Array.isArray(data?.pitchingGames) ? data.pitchingGames : [],
+  }
+}
+
+function migratePlayer(player) {
+  return {
+    ...player,
+    periods: player.periods || player.months || {},
   }
 }
 
@@ -153,13 +138,18 @@ function normalizeSettings(rawSettings = {}, players = []) {
   for (const generation of playerGenerations) {
     if (!generationOrder.includes(generation)) generationOrder.push(generation)
   }
-  const visibleGenerations = Array.isArray(merged.visibleGenerations) ? merged.visibleGenerations.filter((g) => generationOrder.includes(g)) : []
+
+  const visibleGenerations = Array.isArray(merged.visibleGenerations)
+    ? merged.visibleGenerations.filter((g) => generationOrder.includes(g))
+    : generationOrder
 
   return {
     battingSummaryFields: Array.isArray(merged.battingSummaryFields) ? merged.battingSummaryFields : ALL_BATTING_FIELDS,
     pitchingSummaryFields: Array.isArray(merged.pitchingSummaryFields) ? merged.pitchingSummaryFields : ALL_PITCHING_FIELDS,
     visibleGenerations,
-    visibleTypes: Array.isArray(merged.visibleTypes) && merged.visibleTypes.length > 0 ? merged.visibleTypes.filter((t) => TYPE_ORDER.includes(t)) : [...TYPE_ORDER],
+    visibleTypes: Array.isArray(merged.visibleTypes) && merged.visibleTypes.length > 0
+      ? merged.visibleTypes.filter((t) => TYPE_ORDER.includes(t))
+      : [...TYPE_ORDER],
     generationOrder,
   }
 }
@@ -174,7 +164,7 @@ async function loadData() {
 
     if (!error && data?.data) {
       const parsed = data.data
-      const players = Array.isArray(parsed.players) ? parsed.players : [createPlayer()]
+      const players = Array.isArray(parsed.players) ? parsed.players.map(migratePlayer) : [createPlayer()]
       return {
         players,
         settings: normalizeSettings(parsed.settings || {}, players),
@@ -194,7 +184,7 @@ async function loadData() {
     }
 
     const parsed = JSON.parse(raw)
-    const players = Array.isArray(parsed.players) ? parsed.players : [createPlayer()]
+    const players = Array.isArray(parsed.players) ? parsed.players.map(migratePlayer) : [createPlayer()]
     return {
       players,
       settings: normalizeSettings(parsed.settings || {}, players),
@@ -205,7 +195,7 @@ async function loadData() {
       const raw = localStorage.getItem(STORAGE_KEY)
       if (raw) {
         const parsed = JSON.parse(raw)
-        const players = Array.isArray(parsed.players) ? parsed.players : [createPlayer()]
+        const players = Array.isArray(parsed.players) ? parsed.players.map(migratePlayer) : [createPlayer()]
         return {
           players,
           settings: normalizeSettings(parsed.settings || {}, players),
@@ -416,11 +406,50 @@ function sortPlayersForTree(players) {
   })
 }
 
+function AddPlayerModal({ generation, onClose, onSubmit }) {
+  const [name, setName] = useState('')
+  const [position, setPosition] = useState('投手')
+
+  return (
+    <div style={styles.modalOverlay} onClick={onClose}>
+      <div style={styles.modalCard} onClick={(e) => e.stopPropagation()}>
+        <h3 style={{ marginTop: 0, marginBottom: 12 }}>{generation}に選手追加</h3>
+        <div style={styles.modalField}>
+          <div style={styles.label}>選手名</div>
+          <input style={styles.input} value={name} onChange={(e) => setName(e.target.value)} placeholder="選手名" />
+        </div>
+        <div style={styles.modalField}>
+          <div style={styles.label}>ポジション</div>
+          <select style={styles.input} value={position} onChange={(e) => setPosition(e.target.value)}>
+            {POSITIONS.map((item) => <option key={item} value={item}>{item}</option>)}
+          </select>
+        </div>
+        <div style={styles.buttonRow}>
+          <button style={styles.button} onClick={onClose}>キャンセル</button>
+          <button
+            style={styles.button}
+            onClick={() => {
+              const trimmed = name.trim()
+              if (!trimmed) {
+                alert('選手名を入力してください')
+                return
+              }
+              onSubmit(trimmed, position)
+            }}
+          >
+            追加
+          </button>
+        </div>
+      </div>
+    </div>
+  )
+}
+
 export default function App() {
   const [players, setPlayers] = useState([])
   const [settings, setSettings] = useState(DEFAULT_SETTINGS)
   const [selectedPlayerId, setSelectedPlayerId] = useState('')
-  const [monthIndex, setMonthIndex] = useState(0)
+  const [periodIndex, setPeriodIndex] = useState(0)
   const [searchText, setSearchText] = useState('')
   const [mode, setMode] = useState('main')
   const [passwordInput, setPasswordInput] = useState('')
@@ -432,6 +461,7 @@ export default function App() {
     generations: true,
     summary: false,
   })
+  const [addPlayerGeneration, setAddPlayerGeneration] = useState('')
 
   useEffect(() => {
     async function init() {
@@ -445,37 +475,33 @@ export default function App() {
 
   useEffect(() => {
     const playerGenerations = Array.from(new Set(players.map((p) => p.generation).filter(Boolean)))
-
     setSettings((prev) => {
       const nextOrder = [...(Array.isArray(prev.generationOrder) ? prev.generationOrder : [])]
       for (const generation of playerGenerations) {
         if (!nextOrder.includes(generation)) nextOrder.push(generation)
       }
-
       const cleanedOrder = nextOrder.filter((generation) => playerGenerations.includes(generation) || generation.trim() !== '')
-      const nextVisibleGenerations = [...(Array.isArray(prev.visibleGenerations) ? prev.visibleGenerations : [])]
+      const currentVisible = Array.isArray(prev.visibleGenerations) ? [...prev.visibleGenerations] : []
       for (const generation of cleanedOrder) {
-        if (!nextVisibleGenerations.includes(generation)) nextVisibleGenerations.push(generation)
+        if (!currentVisible.includes(generation)) currentVisible.push(generation)
       }
-      const cleanedVisibleGenerations = nextVisibleGenerations.filter((generation) => cleanedOrder.includes(generation))
-
-      const changed =
-        JSON.stringify(cleanedOrder) !== JSON.stringify(prev.generationOrder) ||
-        JSON.stringify(cleanedVisibleGenerations) !== JSON.stringify(prev.visibleGenerations)
-
-      if (!changed) return prev
-
+      const cleanedVisible = currentVisible.filter((generation) => cleanedOrder.includes(generation))
+      if (
+        JSON.stringify(cleanedOrder) === JSON.stringify(prev.generationOrder) &&
+        JSON.stringify(cleanedVisible) === JSON.stringify(prev.visibleGenerations)
+      ) {
+        return prev
+      }
       return {
         ...prev,
         generationOrder: cleanedOrder,
-        visibleGenerations: cleanedVisibleGenerations,
+        visibleGenerations: cleanedVisible,
       }
     })
   }, [players])
 
   useEffect(() => {
     if (players.length === 0) return
-
     const payload = { players, settings }
     localStorage.setItem(STORAGE_KEY, JSON.stringify(payload))
 
@@ -483,10 +509,7 @@ export default function App() {
       const { error } = await supabase
         .from('app_state')
         .upsert([{ id: APP_STATE_ID, data: payload }], { onConflict: 'id' })
-
-      if (error) {
-        console.error('Supabase save error:', error)
-      }
+      if (error) console.error('Supabase save error:', error)
     }
 
     saveToSupabase()
@@ -523,8 +546,8 @@ export default function App() {
 
   const selectedPlayer = players.find((p) => p.id === selectedPlayerId) || players[0] || null
   const playerType = selectedPlayer ? getTypeFromPosition(selectedPlayer.position) : '野手'
-  const currentMonth = MONTHS[monthIndex]
-  const currentData = normalizeMonthData(selectedPlayer?.months?.[currentMonth.id])
+  const currentPeriod = MONTHS[periodIndex]
+  const currentData = normalizePeriodData(selectedPlayer?.periods?.[currentPeriod.id])
 
   useEffect(() => {
     if (!selectedPlayer && filteredPlayers[0]) {
@@ -538,8 +561,8 @@ export default function App() {
   const careerBattingSummary = useMemo(() => {
     if (!selectedPlayer) return battingSummaryObject(sumBattingGames([]))
     const games = []
-    for (const monthKey of Object.keys(selectedPlayer.months || {})) {
-      games.push(...normalizeMonthData(selectedPlayer.months[monthKey]).battingGames)
+    for (const periodKey of Object.keys(selectedPlayer.periods || {})) {
+      games.push(...normalizePeriodData(selectedPlayer.periods[periodKey]).battingGames)
     }
     return battingSummaryObject(sumBattingGames(games))
   }, [selectedPlayer])
@@ -547,8 +570,8 @@ export default function App() {
   const careerPitchingSummary = useMemo(() => {
     if (!selectedPlayer) return pitchingSummaryObject(sumPitchingGames([]))
     const games = []
-    for (const monthKey of Object.keys(selectedPlayer.months || {})) {
-      games.push(...normalizeMonthData(selectedPlayer.months[monthKey]).pitchingGames)
+    for (const periodKey of Object.keys(selectedPlayer.periods || {})) {
+      games.push(...normalizePeriodData(selectedPlayer.periods[periodKey]).pitchingGames)
     }
     return pitchingSummaryObject(sumPitchingGames(games))
   }, [selectedPlayer])
@@ -556,9 +579,9 @@ export default function App() {
   const nationalBattingSummary = useMemo(() => {
     if (!selectedPlayer) return battingSummaryObject(sumBattingGames([]))
     const games = []
-    for (const monthObj of MONTHS) {
-      if (!isNationalMonth(monthObj)) continue
-      games.push(...normalizeMonthData(selectedPlayer.months?.[monthObj.id]).battingGames)
+    for (const periodObj of MONTHS) {
+      if (!isNationalMonth(periodObj)) continue
+      games.push(...normalizePeriodData(selectedPlayer.periods?.[periodObj.id]).battingGames)
     }
     return battingSummaryObject(sumBattingGames(games))
   }, [selectedPlayer])
@@ -566,9 +589,9 @@ export default function App() {
   const nationalPitchingSummary = useMemo(() => {
     if (!selectedPlayer) return pitchingSummaryObject(sumPitchingGames([]))
     const games = []
-    for (const monthObj of MONTHS) {
-      if (!isNationalMonth(monthObj)) continue
-      games.push(...normalizeMonthData(selectedPlayer.months?.[monthObj.id]).pitchingGames)
+    for (const periodObj of MONTHS) {
+      if (!isNationalMonth(periodObj)) continue
+      games.push(...normalizePeriodData(selectedPlayer.periods?.[periodObj.id]).pitchingGames)
     }
     return pitchingSummaryObject(sumPitchingGames(games))
   }, [selectedPlayer])
@@ -577,15 +600,15 @@ export default function App() {
     setPlayers((prev) => prev.map((p) => (p.id === playerId ? { ...p, ...patch } : p)))
   }
 
-  function updateMonthData(playerId, monthId, patch) {
+  function updatePeriodData(playerId, periodId, patch) {
     setPlayers((prev) => prev.map((p) => {
       if (p.id !== playerId) return p
       return {
         ...p,
-        months: {
-          ...p.months,
-          [monthId]: {
-            ...normalizeMonthData(p.months[monthId]),
+        periods: {
+          ...p.periods,
+          [periodId]: {
+            ...normalizePeriodData(p.periods?.[periodId]),
             ...patch,
           }
         }
@@ -608,19 +631,15 @@ export default function App() {
     setExpandedGenerations((prev) => ({ ...prev, [name]: true }))
   }
 
-  function addPlayerToGeneration(generation) {
-    const name = window.prompt('選手名を入力してください', '')?.trim()
-    if (!name) return
-    const positionInput = window.prompt(`ポジションを入力してください（${POSITIONS.join(' / ')}）`, '投手')?.trim()
-    if (!positionInput || !POSITIONS.includes(positionInput)) {
-      alert('ポジションが正しくありません')
-      return
-    }
-    const newPlayer = createPlayer(name, generation, positionInput)
+  function submitAddPlayer(name, position) {
+    const generation = addPlayerGeneration
+    if (!generation) return
+    const newPlayer = createPlayer(name, generation, position)
     setPlayers((prev) => [...prev, newPlayer])
     setSelectedPlayerId(newPlayer.id)
     setExpandedGenerations((prev) => ({ ...prev, [generation]: true }))
-    setExpandedTypes((prev) => ({ ...prev, [`${generation}-${getTypeFromPosition(positionInput)}`]: true }))
+    setExpandedTypes((prev) => ({ ...prev, [`${generation}-${getTypeFromPosition(position)}`]: true }))
+    setAddPlayerGeneration('')
     setMode('main')
   }
 
@@ -633,41 +652,41 @@ export default function App() {
     setSelectedPlayerId(nextPlayers[0]?.id || '')
   }
 
-  function handleImage(file) {
-  if (!selectedPlayer || !file) return
-  const reader = new FileReader()
-  reader.onload = () => {
-    updatePlayer(selectedPlayer.id, { image: reader.result })
+  function handleImage(file, key = 'image') {
+    if (!selectedPlayer || !file) return
+    const reader = new FileReader()
+    reader.onload = () => {
+      updatePeriodData(selectedPlayer.id, currentPeriod.id, { [key]: reader.result })
+    }
+    reader.readAsDataURL(file)
   }
-  reader.readAsDataURL(file)
-}
 
   function updateBattingGame(index, key, value) {
     const next = [...currentData.battingGames]
     next[index] = { ...next[index], [key]: value }
-    updateMonthData(selectedPlayer.id, currentMonth.id, { battingGames: next })
+    updatePeriodData(selectedPlayer.id, currentPeriod.id, { battingGames: next })
   }
 
   function updatePitchingGame(index, key, value) {
     const next = [...currentData.pitchingGames]
     next[index] = { ...next[index], [key]: value }
-    updateMonthData(selectedPlayer.id, currentMonth.id, { pitchingGames: next })
+    updatePeriodData(selectedPlayer.id, currentPeriod.id, { pitchingGames: next })
   }
 
   function addBattingGame() {
-    updateMonthData(selectedPlayer.id, currentMonth.id, { battingGames: [...currentData.battingGames, emptyBattingGame()] })
+    updatePeriodData(selectedPlayer.id, currentPeriod.id, { battingGames: [...currentData.battingGames, emptyBattingGame()] })
   }
 
   function addPitchingGame() {
-    updateMonthData(selectedPlayer.id, currentMonth.id, { pitchingGames: [...currentData.pitchingGames, emptyPitchingGame()] })
+    updatePeriodData(selectedPlayer.id, currentPeriod.id, { pitchingGames: [...currentData.pitchingGames, emptyPitchingGame()] })
   }
 
   function deleteBattingGame(index) {
-    updateMonthData(selectedPlayer.id, currentMonth.id, { battingGames: currentData.battingGames.filter((_, i) => i !== index) })
+    updatePeriodData(selectedPlayer.id, currentPeriod.id, { battingGames: currentData.battingGames.filter((_, i) => i !== index) })
   }
 
   function deletePitchingGame(index) {
-    updateMonthData(selectedPlayer.id, currentMonth.id, { pitchingGames: currentData.pitchingGames.filter((_, i) => i !== index) })
+    updatePeriodData(selectedPlayer.id, currentPeriod.id, { pitchingGames: currentData.pitchingGames.filter((_, i) => i !== index) })
   }
 
   function toggleSummaryField(groupKey, field) {
@@ -783,7 +802,7 @@ export default function App() {
     reader.onload = (e) => {
       try {
         const data = JSON.parse(e.target?.result)
-        const nextPlayers = Array.isArray(data.players) ? data.players : []
+        const nextPlayers = Array.isArray(data.players) ? data.players.map(migratePlayer) : []
         setPlayers(nextPlayers)
         setSettings(normalizeSettings(data.settings || {}, nextPlayers))
         alert('バックアップ読み込み成功')
@@ -850,299 +869,286 @@ export default function App() {
   }
 
   return (
-    <div style={styles.app}>
-      <div style={styles.sidebar}>
-        <div style={styles.sidebarTop}>
-          <h2 style={styles.title}>栄冠ナイン管理</h2>
-          <div style={styles.modeRow}>
-            <button style={{ ...styles.modeButton, ...(mode === 'main' ? styles.activeModeButton : {}) }} onClick={() => setMode('main')}>通常</button>
-            <button style={{ ...styles.modeButton, ...(mode === 'settings' ? styles.activeModeButton : {}) }} onClick={() => setMode('settings')}>設定</button>
-            <button style={styles.modeButton} onClick={exportBackup}>バックアップ保存</button>
-          </div>
-          <div style={styles.backupRow}>
-            <input type="file" accept=".json" onChange={(e) => importBackup(e.target.files?.[0])} />
-          </div>
-          <div style={styles.searchRow}>
-            <input style={styles.input} value={searchText} onChange={(e) => setSearchText(e.target.value)} placeholder="名前・タグ検索" />
-          </div>
-        </div>
+    <>
+      {addPlayerGeneration && (
+        <AddPlayerModal
+          generation={addPlayerGeneration}
+          onClose={() => setAddPlayerGeneration('')}
+          onSubmit={submitAddPlayer}
+        />
+      )}
 
-        <div style={styles.treeArea}>
-          {effectiveVisibleGenerations.length === 0 ? (
-            <div style={styles.emptyText}>表示対象の世代がありません</div>
-          ) : (
-            effectiveVisibleGenerations.map((generation) => {
-              const isGenerationOpen = !!expandedGenerations[generation]
-              return (
-                <div key={generation} style={styles.treeGenerationWrap}>
-                  <div style={styles.treeGenerationRow}>
-                    <button style={styles.treeToggleButton} onClick={() => toggleGenerationOpen(generation)}>
-                      {isGenerationOpen ? '▾' : '▸'}
-                    </button>
-                    <button style={styles.generationLabelButton} onClick={() => toggleGenerationOpen(generation)}>
-                      {generation}
-                    </button>
-                    <button style={styles.addInlineButton} onClick={() => addPlayerToGeneration(generation)}>＋</button>
-                  </div>
+      <div style={styles.app}>
+        <div style={styles.sidebar}>
+          <div style={styles.sidebarTop}>
+            <h2 style={styles.title}>栄冠ナイン管理</h2>
+            <div style={styles.modeRow}>
+              <button style={{ ...styles.modeButton, ...(mode === 'main' ? styles.activeModeButton : {}) }} onClick={() => setMode('main')}>通常</button>
+              <button style={{ ...styles.modeButton, ...(mode === 'settings' ? styles.activeModeButton : {}) }} onClick={() => setMode('settings')}>設定</button>
+              <button style={styles.modeButton} onClick={exportBackup}>バックアップ保存</button>
+            </div>
+            <div style={styles.backupRow}>
+              <input type="file" accept=".json" onChange={(e) => importBackup(e.target.files?.[0])} />
+            </div>
+            <div style={styles.searchRow}>
+              <input style={styles.input} value={searchText} onChange={(e) => setSearchText(e.target.value)} placeholder="名前・タグ検索" />
+            </div>
+          </div>
 
-                  {isGenerationOpen && TYPE_ORDER.filter((type) => effectiveVisibleTypes.includes(type)).map((type) => {
-                    const key = `${generation}-${type}`
-                    const isTypeOpen = !!expandedTypes[key]
-                    const playersInType = treeData[generation]?.[type] || []
-                    return (
-                      <div key={key} style={styles.treeTypeWrap}>
-                        <div style={styles.treeTypeRow}>
-                          <button style={styles.treeToggleButton} onClick={() => toggleTypeOpen(generation, type)}>
-                            {isTypeOpen ? '▾' : '▸'}
-                          </button>
-                          <button style={styles.typeLabelButton} onClick={() => toggleTypeOpen(generation, type)}>
-                            {type}
-                          </button>
-                        </div>
-                        {isTypeOpen && (
-                          <div style={styles.treePlayersWrap}>
-                            {playersInType.length === 0 ? (
-                              <div style={styles.emptyText}>なし</div>
-                            ) : playersInType.map((player) => (
-                              <button
-                                key={player.id}
-                                onClick={() => {
-                                  setSelectedPlayerId(player.id)
-                                  setMode('main')
-                                }}
-                                style={{
-                                  ...styles.playerButton,
-                                  backgroundColor: player.id === selectedPlayerId ? '#dbeafe' : POSITION_COLORS[player.position] || 'white',
-                                  borderColor: player.id === selectedPlayerId ? '#60a5fa' : 'rgba(0,0,0,0.06)',
-                                }}
-                              >
-                                {player.name}
-                              </button>
-                            ))}
+          <div style={styles.treeArea}>
+            {effectiveVisibleGenerations.length === 0 ? (
+              <div style={styles.emptyText}>表示対象の世代がありません</div>
+            ) : (
+              effectiveVisibleGenerations.map((generation) => {
+                const isGenerationOpen = !!expandedGenerations[generation]
+                return (
+                  <div key={generation} style={styles.treeGenerationWrap}>
+                    <div style={styles.treeGenerationRow}>
+                      <button style={styles.treeToggleButton} onClick={() => toggleGenerationOpen(generation)}>
+                        {isGenerationOpen ? '▾' : '▸'}
+                      </button>
+                      <button style={styles.generationLabelButton} onClick={() => toggleGenerationOpen(generation)}>
+                        {generation}
+                      </button>
+                      <button style={styles.addInlineButton} onClick={() => setAddPlayerGeneration(generation)}>＋</button>
+                    </div>
+
+                    {isGenerationOpen && TYPE_ORDER.filter((type) => effectiveVisibleTypes.includes(type)).map((type) => {
+                      const key = `${generation}-${type}`
+                      const isTypeOpen = !!expandedTypes[key]
+                      const playersInType = treeData[generation]?.[type] || []
+                      return (
+                        <div key={key} style={styles.treeTypeWrap}>
+                          <div style={styles.treeTypeRow}>
+                            <button style={styles.treeToggleButton} onClick={() => toggleTypeOpen(generation, type)}>
+                              {isTypeOpen ? '▾' : '▸'}
+                            </button>
+                            <button style={styles.typeLabelButton} onClick={() => toggleTypeOpen(generation, type)}>
+                              {type}
+                            </button>
                           </div>
-                        )}
-                      </div>
-                    )
-                  })}
-                </div>
-              )
-            })
-          )}
-        </div>
-      </div>
-
-      <div style={styles.main}>
-        {mode === 'settings' ? (
-          <div style={styles.settingsWrap}>
-            <div style={styles.card}>
-              <button style={styles.sectionToggleButton} onClick={() => toggleSettingsSection('display')}>
-                {openSettingsSections.display ? '▾' : '▸'} 表示対象設定
-              </button>
-              {openSettingsSections.display && (
-                <div style={styles.settingBlock}>
-                  <div style={styles.settingTitle}>世代</div>
-                  <div style={styles.checkboxGridCompact}>
-                    {generationOrder.map((generation) => (
-                      <label key={generation} style={styles.checkboxLabel}>
-                        <input
-                          type="checkbox"
-                          checked={effectiveVisibleGenerations.includes(generation)}
-                          onChange={() => toggleGenerationVisibility(generation)}
-                        />
-                        <span>{generation}</span>
-                      </label>
-                    ))}
-                  </div>
-
-                  <div style={styles.settingTitle}>投手・野手</div>
-                  <div style={styles.checkboxGridCompact}>
-                    {TYPE_ORDER.map((type) => (
-                      <label key={type} style={styles.checkboxLabel}>
-                        <input
-                          type="checkbox"
-                          checked={effectiveVisibleTypes.includes(type)}
-                          onChange={() => toggleTypeVisibility(type)}
-                        />
-                        <span>{type}</span>
-                      </label>
-                    ))}
-                  </div>
-                </div>
-              )}
-            </div>
-
-            <div style={styles.card}>
-              <button style={styles.sectionToggleButton} onClick={() => toggleSettingsSection('generations')}>
-                {openSettingsSections.generations ? '▾' : '▸'} 世代設定
-              </button>
-              {openSettingsSections.generations && (
-                <div style={styles.settingBlock}>
-                  <div style={styles.buttonRow}>
-                    <button style={styles.button} onClick={addGeneration}>世代追加</button>
-                  </div>
-                  <div style={styles.generationSettingList}>
-                    {generationOrder.map((generation, index) => (
-                      <div key={generation} style={styles.generationSettingRow}>
-                        <input
-                          style={styles.smallInput}
-                          defaultValue={generation}
-                          onBlur={(e) => renameGeneration(generation, e.target.value)}
-                          onKeyDown={(e) => {
-                            if (e.key === 'Enter') {
-                              renameGeneration(generation, e.currentTarget.value)
-                              e.currentTarget.blur()
-                            }
-                          }}
-                        />
-                        <div style={styles.generationOrderButtons}>
-                          <button style={styles.smallSquareButton} disabled={index === 0} onClick={() => moveGeneration(generation, 'up')}>↑</button>
-                          <button style={styles.smallSquareButton} disabled={index === generationOrder.length - 1} onClick={() => moveGeneration(generation, 'down')}>↓</button>
+                          {isTypeOpen && (
+                            <div style={styles.treePlayersWrap}>
+                              {playersInType.length === 0 ? (
+                                <div style={styles.emptyText}>なし</div>
+                              ) : playersInType.map((player) => (
+                                <button
+                                  key={player.id}
+                                  onClick={() => {
+                                    setSelectedPlayerId(player.id)
+                                    setMode('main')
+                                  }}
+                                  style={{
+                                    ...styles.playerButton,
+                                    backgroundColor: POSITION_COLORS[player.position] || 'white',
+                                    borderColor: player.id === selectedPlayerId ? '#111827' : 'rgba(0,0,0,0.08)',
+                                    boxShadow: player.id === selectedPlayerId ? 'inset 0 0 0 2px #111827' : 'none',
+                                  }}
+                                >
+                                  {player.name}
+                                </button>
+                              ))}
+                            </div>
+                          )}
                         </div>
-                      </div>
-                    ))}
+                      )
+                    })}
                   </div>
-                </div>
-              )}
-            </div>
-
-            <div style={styles.card}>
-              <button style={styles.sectionToggleButton} onClick={() => toggleSettingsSection('summary')}>
-                {openSettingsSections.summary ? '▾' : '▸'} サマリー表示設定
-              </button>
-              {openSettingsSections.summary && (
-                <div style={styles.settingBlock}>
-                  <div style={styles.settingTitle}>野手サマリーに表示する項目</div>
-                  <div style={styles.checkboxGrid}>
-                    {ALL_BATTING_FIELDS.map((field) => (
-                      <label key={field} style={styles.checkboxLabel}>
-                        <input
-                          type="checkbox"
-                          checked={settings.battingSummaryFields.includes(field)}
-                          onChange={() => toggleSummaryField('battingSummaryFields', field)}
-                        />
-                        <span>{field}</span>
-                      </label>
-                    ))}
-                  </div>
-
-                  <div style={styles.settingTitle}>投手サマリーに表示する項目</div>
-                  <div style={styles.checkboxGrid}>
-                    {ALL_PITCHING_FIELDS.map((field) => (
-                      <label key={field} style={styles.checkboxLabel}>
-                        <input
-                          type="checkbox"
-                          checked={settings.pitchingSummaryFields.includes(field)}
-                          onChange={() => toggleSummaryField('pitchingSummaryFields', field)}
-                        />
-                        <span>{field}</span>
-                      </label>
-                    ))}
-                  </div>
-                </div>
-              )}
-            </div>
+                )
+              })
+            )}
           </div>
-        ) : !selectedPlayer ? (
-          <div>左から選手を選んでください</div>
-        ) : (
-          <>
-            <div style={styles.headerCard}>
-              <div style={styles.headerMainRow}>
-                <div>
-                  <h2 style={{ margin: 0 }}>{selectedPlayer.name}</h2>
-                  <div style={styles.metaText}>{selectedPlayer.generation} / {selectedPlayer.position}</div>
-                </div>
-                <div style={styles.headerStatsGrid}>
-                  <div style={styles.headerStatsBox}>
-                    {playerType === '投手' ? (
-                      <>
-                        <div style={styles.headerStatsLabel}>通算成績（{careerPitchingSummary['試合数']}試合）</div>
-                        <div style={styles.headerStatsText}>{pitchingLine1(careerPitchingSummary)}</div>
-                        <div style={styles.headerStatsText}>{pitchingLine2(careerPitchingSummary)}</div>
-                      </>
-                    ) : (
-                      <>
-                        <div style={styles.headerStatsLabel}>通算成績（{careerBattingSummary['試合数']}試合）</div>
-                        <div style={styles.headerStatsText}>{battingLine1(careerBattingSummary)}</div>
-                        <div style={styles.headerStatsText}>{battingLine2(careerBattingSummary)}</div>
-                      </>
-                    )}
-                  </div>
-                  <div style={styles.headerStatsBox}>
-                    {playerType === '投手' ? (
-                      <>
-                        <div style={styles.headerStatsLabel}>全国大会（{nationalPitchingSummary['試合数']}試合）</div>
-                        <div style={styles.headerStatsText}>{pitchingLine1(nationalPitchingSummary)}</div>
-                        <div style={styles.headerStatsText}>{pitchingLine2(nationalPitchingSummary)}</div>
-                      </>
-                    ) : (
-                      <>
-                        <div style={styles.headerStatsLabel}>全国大会（{nationalBattingSummary['試合数']}試合）</div>
-                        <div style={styles.headerStatsText}>{battingLine1(nationalBattingSummary)}</div>
-                        <div style={styles.headerStatsText}>{battingLine2(nationalBattingSummary)}</div>
-                      </>
-                    )}
-                  </div>
-                </div>
-              </div>
-              <div style={styles.buttonRow}>
-                <button onClick={handleLogout} style={styles.button}>ロック</button>
-                <button onClick={deleteSelectedPlayer} style={{ ...styles.button, backgroundColor: '#fee2e2' }}>選手削除</button>
-              </div>
-            </div>
+        </div>
 
-            <div style={styles.infoCard}>
-              <div style={styles.compactInfoRow}>
-                <div style={styles.compactFieldWide}>
-                  <div style={styles.label}>選手名</div>
-                  <input style={styles.smallInput} value={selectedPlayer.name} onChange={(e) => updatePlayer(selectedPlayer.id, { name: e.target.value })} />
-                </div>
-                <div style={styles.compactField}>
-                  <div style={styles.label}>世代</div>
-                  <select style={styles.smallInput} value={selectedPlayer.generation} onChange={(e) => updatePlayer(selectedPlayer.id, { generation: e.target.value })}>
-                    {generationOrder.map((generation) => <option key={generation} value={generation}>{generation}</option>)}
-                  </select>
-                </div>
-                <div style={styles.compactField}>
-                  <div style={styles.label}>ポジション</div>
-                  <select style={styles.smallInput} value={selectedPlayer.position} onChange={(e) => updatePlayer(selectedPlayer.id, { position: e.target.value })}>
-                    {POSITIONS.map((position) => <option key={position} value={position}>{position}</option>)}
-                  </select>
-                </div>
-                <div style={styles.compactField}>
-                  <div style={styles.label}>タグ</div>
-                  <input style={styles.smallInput} value={selectedPlayer.tags} onChange={(e) => updatePlayer(selectedPlayer.id, { tags: e.target.value })} placeholder="エース、主砲" />
-                </div>
-              </div>
-            </div>
-
-            <div style={styles.topContentGrid}>
+        <div style={styles.main}>
+          {mode === 'settings' ? (
+            <div style={styles.settingsWrap}>
               <div style={styles.card}>
-                <div style={styles.cardTitle}>画像</div>
-                <div style={styles.imageStack}>
+                <button style={styles.sectionToggleButton} onClick={() => toggleSettingsSection('display')}>
+                  {openSettingsSections.display ? '▾' : '▸'} 表示対象設定
+                </button>
+                {openSettingsSections.display && (
+                  <div style={styles.settingBlock}>
+                    <div style={styles.settingTitle}>世代</div>
+                    <div style={styles.checkboxGridCompact}>
+                      {generationOrder.map((generation) => (
+                        <label key={generation} style={styles.checkboxLabel}>
+                          <input
+                            type="checkbox"
+                            checked={effectiveVisibleGenerations.includes(generation)}
+                            onChange={() => toggleGenerationVisibility(generation)}
+                          />
+                          <span>{generation}</span>
+                        </label>
+                      ))}
+                    </div>
+
+                    <div style={styles.settingTitle}>投手・野手</div>
+                    <div style={styles.checkboxGridCompact}>
+                      {TYPE_ORDER.map((type) => (
+                        <label key={type} style={styles.checkboxLabel}>
+                          <input
+                            type="checkbox"
+                            checked={effectiveVisibleTypes.includes(type)}
+                            onChange={() => toggleTypeVisibility(type)}
+                          />
+                          <span>{type}</span>
+                        </label>
+                      ))}
+                    </div>
+                  </div>
+                )}
+              </div>
+
+              <div style={styles.card}>
+                <button style={styles.sectionToggleButton} onClick={() => toggleSettingsSection('generations')}>
+                  {openSettingsSections.generations ? '▾' : '▸'} 世代設定
+                </button>
+                {openSettingsSections.generations && (
+                  <div style={styles.settingBlock}>
+                    <div style={styles.buttonRow}>
+                      <button style={styles.button} onClick={addGeneration}>世代追加</button>
+                    </div>
+                    <div style={styles.generationSettingList}>
+                      {generationOrder.map((generation, index) => (
+                        <div key={generation} style={styles.generationSettingRow}>
+                          <input
+                            style={styles.smallInput}
+                            defaultValue={generation}
+                            onBlur={(e) => renameGeneration(generation, e.target.value)}
+                            onKeyDown={(e) => {
+                              if (e.key === 'Enter') {
+                                renameGeneration(generation, e.currentTarget.value)
+                                e.currentTarget.blur()
+                              }
+                            }}
+                          />
+                          <div style={styles.generationOrderButtons}>
+                            <button style={styles.smallSquareButton} disabled={index === 0} onClick={() => moveGeneration(generation, 'up')}>↑</button>
+                            <button style={styles.smallSquareButton} disabled={index === generationOrder.length - 1} onClick={() => moveGeneration(generation, 'down')}>↓</button>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+              </div>
+
+              <div style={styles.card}>
+                <button style={styles.sectionToggleButton} onClick={() => toggleSettingsSection('summary')}>
+                  {openSettingsSections.summary ? '▾' : '▸'} サマリー表示設定
+                </button>
+                {openSettingsSections.summary && (
+                  <div style={styles.settingBlock}>
+                    <div style={styles.settingTitle}>野手サマリーに表示する項目</div>
+                    <div style={styles.checkboxGrid}>
+                      {ALL_BATTING_FIELDS.map((field) => (
+                        <label key={field} style={styles.checkboxLabel}>
+                          <input
+                            type="checkbox"
+                            checked={settings.battingSummaryFields.includes(field)}
+                            onChange={() => toggleSummaryField('battingSummaryFields', field)}
+                          />
+                          <span>{field}</span>
+                        </label>
+                      ))}
+                    </div>
+
+                    <div style={styles.settingTitle}>投手サマリーに表示する項目</div>
+                    <div style={styles.checkboxGrid}>
+                      {ALL_PITCHING_FIELDS.map((field) => (
+                        <label key={field} style={styles.checkboxLabel}>
+                          <input
+                            type="checkbox"
+                            checked={settings.pitchingSummaryFields.includes(field)}
+                            onChange={() => toggleSummaryField('pitchingSummaryFields', field)}
+                          />
+                          <span>{field}</span>
+                        </label>
+                      ))}
+                    </div>
+                  </div>
+                )}
+              </div>
+            </div>
+          ) : !selectedPlayer ? (
+            <div>左から選手を選んでください</div>
+          ) : (
+            <>
+              <div style={styles.headerCard}>
+                <div style={styles.headerMainRow}>
                   <div>
-                    <div
-                      style={styles.dropAreaSmall}
-                      onDragOver={(e) => e.preventDefault()}
-                      onDrop={(e) => {
-                        e.preventDefault()
-                        const file = e.dataTransfer.files?.[0]
-                        if (file) handleImage(file, 'image')
-                      }}
-                    >
-                      {selectedPlayer.image ? (
-                        <img src={selectedPlayer.image} alt="player" style={styles.image} />
+                    <h2 style={{ margin: 0 }}>{selectedPlayer.name}</h2>
+                    <div style={styles.metaText}>{selectedPlayer.generation} / {selectedPlayer.position}</div>
+                  </div>
+                  <div style={styles.headerStatsGrid}>
+                    <div style={styles.headerStatsBox}>
+                      {playerType === '投手' ? (
+                        <>
+                          <div style={styles.headerStatsLabel}>通算成績（{careerPitchingSummary['試合数']}試合）</div>
+                          <div style={styles.headerStatsText}>{pitchingLine1(careerPitchingSummary)}</div>
+                          <div style={styles.headerStatsText}>{pitchingLine2(careerPitchingSummary)}</div>
+                        </>
                       ) : (
-                        <div>ここに画像をドラッグ＆ドロップ</div>
+                        <>
+                          <div style={styles.headerStatsLabel}>通算成績（{careerBattingSummary['試合数']}試合）</div>
+                          <div style={styles.headerStatsText}>{battingLine1(careerBattingSummary)}</div>
+                          <div style={styles.headerStatsText}>{battingLine2(careerBattingSummary)}</div>
+                        </>
                       )}
                     </div>
-                    <div style={styles.buttonRow}>
-                      <input type="file" accept="image/*" onChange={(e) => handleImage(e.target.files?.[0], 'image')} />
-                      <button style={styles.button} onClick={() => updatePlayer(selectedPlayer.id, { image: '' })}>画像削除</button>
+                    <div style={styles.headerStatsBox}>
+                      {playerType === '投手' ? (
+                        <>
+                          <div style={styles.headerStatsLabel}>全国大会（{nationalPitchingSummary['試合数']}試合）</div>
+                          <div style={styles.headerStatsText}>{pitchingLine1(nationalPitchingSummary)}</div>
+                          <div style={styles.headerStatsText}>{pitchingLine2(nationalPitchingSummary)}</div>
+                        </>
+                      ) : (
+                        <>
+                          <div style={styles.headerStatsLabel}>全国大会（{nationalBattingSummary['試合数']}試合）</div>
+                          <div style={styles.headerStatsText}>{battingLine1(nationalBattingSummary)}</div>
+                          <div style={styles.headerStatsText}>{battingLine2(nationalBattingSummary)}</div>
+                        </>
+                      )}
                     </div>
                   </div>
+                </div>
+                <div style={styles.buttonRow}>
+                  <button onClick={handleLogout} style={styles.button}>ロック</button>
+                  <button onClick={deleteSelectedPlayer} style={{ ...styles.button, backgroundColor: '#fee2e2' }}>選手削除</button>
+                </div>
+              </div>
 
-                  {playerType === '投手' && (
+              <div style={styles.infoCard}>
+                <div style={styles.compactInfoRow}>
+                  <div style={styles.compactFieldWide}>
+                    <div style={styles.label}>選手名</div>
+                    <input style={styles.smallInput} value={selectedPlayer.name} onChange={(e) => updatePlayer(selectedPlayer.id, { name: e.target.value })} />
+                  </div>
+                  <div style={styles.compactField}>
+                    <div style={styles.label}>世代</div>
+                    <select style={styles.smallInput} value={selectedPlayer.generation} onChange={(e) => updatePlayer(selectedPlayer.id, { generation: e.target.value })}>
+                      {generationOrder.map((generation) => <option key={generation} value={generation}>{generation}</option>)}
+                    </select>
+                  </div>
+                  <div style={styles.compactField}>
+                    <div style={styles.label}>ポジション</div>
+                    <select style={styles.smallInput} value={selectedPlayer.position} onChange={(e) => updatePlayer(selectedPlayer.id, { position: e.target.value })}>
+                      {POSITIONS.map((position) => <option key={position} value={position}>{position}</option>)}
+                    </select>
+                  </div>
+                  <div style={styles.compactField}>
+                    <div style={styles.label}>タグ</div>
+                    <input style={styles.smallInput} value={selectedPlayer.tags} onChange={(e) => updatePlayer(selectedPlayer.id, { tags: e.target.value })} placeholder="エース、主砲" />
+                  </div>
+                </div>
+              </div>
+
+              <div style={styles.topContentGrid}>
+                <div style={styles.card}>
+                  <div style={styles.cardTitle}>画像</div>
+                  <div style={styles.imageStack}>
                     <div>
                       <div
                         style={styles.dropAreaSmall}
@@ -1150,165 +1156,185 @@ export default function App() {
                         onDrop={(e) => {
                           e.preventDefault()
                           const file = e.dataTransfer.files?.[0]
-                          if (file) handleImage(file, 'subImage')
+                          if (file) handleImage(file, 'image')
                         }}
                       >
-                        {currentData.subImage ? (
-                          <img src={currentData.subImage} alt="player-sub" style={styles.image} />
+                        {currentData.image ? (
+                          <img src={currentData.image} alt="player" style={styles.image} />
                         ) : (
                           <div>ここに画像をドラッグ＆ドロップ</div>
                         )}
                       </div>
                       <div style={styles.buttonRow}>
-                        <input type="file" accept="image/*" onChange={(e) => handleImage(e.target.files?.[0], 'subImage')} />
-                        <button style={styles.button} onClick={() => updateMonthData(selectedPlayer.id, currentMonth.id, { subImage: '' })}>画像削除</button>
+                        <input type="file" accept="image/*" onChange={(e) => handleImage(e.target.files?.[0], 'image')} />
+                        <button style={styles.button} onClick={() => updatePeriodData(selectedPlayer.id, currentPeriod.id, { image: '' })}>画像削除</button>
                       </div>
                     </div>
+
+                    {playerType === '投手' && (
+                      <div>
+                        <div
+                          style={styles.dropAreaSmall}
+                          onDragOver={(e) => e.preventDefault()}
+                          onDrop={(e) => {
+                            e.preventDefault()
+                            const file = e.dataTransfer.files?.[0]
+                            if (file) handleImage(file, 'subImage')
+                          }}
+                        >
+                          {currentData.subImage ? (
+                            <img src={currentData.subImage} alt="player-sub" style={styles.image} />
+                          ) : (
+                            <div>ここに画像をドラッグ＆ドロップ</div>
+                          )}
+                        </div>
+                        <div style={styles.buttonRow}>
+                          <input type="file" accept="image/*" onChange={(e) => handleImage(e.target.files?.[0], 'subImage')} />
+                          <button style={styles.button} onClick={() => updatePeriodData(selectedPlayer.id, currentPeriod.id, { subImage: '' })}>画像削除</button>
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                </div>
+
+                <div style={styles.summarySideCard}>
+                  <div style={styles.summaryHeaderLeft}>
+                    <button style={styles.button} onClick={() => setPeriodIndex((v) => Math.max(0, v - 1))}>← 前の時期</button>
+                    <div style={{ fontWeight: 'bold', fontSize: 22 }}>{currentPeriod.label}</div>
+                    <button style={styles.button} onClick={() => setPeriodIndex((v) => Math.min(MONTHS.length - 1, v + 1))}>次の時期 →</button>
+                  </div>
+
+                  <div style={styles.periodCompactWrap}>
+                    {[1, 2, 3].map((grade) => {
+                      const gradePeriods = MONTHS.filter((item) => item.grade === grade)
+                      return (
+                        <div key={grade} style={styles.gradeRow}>
+                          <div style={styles.gradeLabel}>{grade}年生</div>
+                          <div style={styles.gradeMonthsWrap}>
+                            {gradePeriods.map((item) => {
+                              const index = MONTHS.findIndex((x) => x.id === item.id)
+                              return (
+                                <button
+                                  key={item.id}
+                                  onClick={() => setPeriodIndex(index)}
+                                  style={{
+                                    ...styles.monthTinyChip,
+                                    backgroundColor: index === periodIndex ? '#1d4ed8' : '#e5e7eb',
+                                    color: index === periodIndex ? 'white' : 'black'
+                                  }}
+                                >
+                                  {item.short}
+                                </button>
+                              )
+                            })}
+                          </div>
+                        </div>
+                      )
+                    })}
+                  </div>
+
+                  {playerType === '投手' ? (
+                    <>
+                      <div style={styles.summaryBlockTight}>
+                        <div style={styles.summaryTitle}>時期合計（{monthPitchingSummary['試合数']}試合・投手）</div>
+                        <div style={styles.summaryLine}>{pitchingLine1(monthPitchingSummary)}</div>
+                        <div style={styles.summaryLine}>{pitchingLine2(monthPitchingSummary)}</div>
+                      </div>
+                      <div style={styles.summaryBlockTight}>
+                        <div style={styles.summaryTitle}>時期合計（{monthBattingSummary['試合数']}試合・野手）</div>
+                        <div style={styles.summaryLine}>{battingLine1(monthBattingSummary)}</div>
+                        <div style={styles.summaryLine}>{battingLine2(monthBattingSummary)}</div>
+                      </div>
+                      <div style={styles.summaryBlockTight}>
+                        <div style={styles.summaryTitle}>通算（{careerPitchingSummary['試合数']}試合・投手）</div>
+                        <div style={styles.summaryLine}>{pitchingLine1(careerPitchingSummary)}</div>
+                        <div style={styles.summaryLine}>{pitchingLine2(careerPitchingSummary)}</div>
+                      </div>
+                      <div style={styles.summaryBlockTight}>
+                        <div style={styles.summaryTitle}>通算（{careerBattingSummary['試合数']}試合・野手）</div>
+                        <div style={styles.summaryLine}>{battingLine1(careerBattingSummary)}</div>
+                        <div style={styles.summaryLine}>{battingLine2(careerBattingSummary)}</div>
+                      </div>
+                    </>
+                  ) : (
+                    <>
+                      <div style={styles.summaryBlockTight}>
+                        <div style={styles.summaryTitle}>時期合計（{monthBattingSummary['試合数']}試合）</div>
+                        <div style={styles.summaryLine}>{battingLine1(monthBattingSummary)}</div>
+                        <div style={styles.summaryLine}>{battingLine2(monthBattingSummary)}</div>
+                      </div>
+                      <div style={styles.summaryBlockTight}>
+                        <div style={styles.summaryTitle}>通算（{careerBattingSummary['試合数']}試合）</div>
+                        <div style={styles.summaryLine}>{battingLine1(careerBattingSummary)}</div>
+                        <div style={styles.summaryLine}>{battingLine2(careerBattingSummary)}</div>
+                      </div>
+                    </>
                   )}
                 </div>
               </div>
 
-              <div style={styles.summarySideCard}>
-                <div style={styles.summaryHeaderLeft}>
-                  <button style={styles.button} onClick={() => setMonthIndex((m) => Math.max(0, m - 1))}>← 前の月</button>
-                  <div style={{ fontWeight: 'bold', fontSize: 22 }}>{currentMonth.label}</div>
-                  <button style={styles.button} onClick={() => setMonthIndex((m) => Math.min(MONTHS.length - 1, m + 1))}>次の月 →</button>
-                </div>
-
-                <div style={styles.monthCompactWrap}>
-                  {[1, 2, 3].map((grade) => {
-                    const gradeMonths = MONTHS.filter((m) => m.id !== 'graduation' && m.grade === grade)
-                    return (
-                      <div key={grade} style={styles.gradeRow}>
-                        <div style={styles.gradeLabel}>{grade}年生</div>
-                        <div style={styles.gradeMonthsWrap}>
-                          {gradeMonths.map((m) => {
-                            const index = MONTHS.findIndex((x) => x.id === m.id)
-                            return (
-                              <button
-                                key={m.id}
-                                onClick={() => setMonthIndex(index)}
-                                style={{ ...styles.monthTinyChip, backgroundColor: index === monthIndex ? '#1d4ed8' : '#e5e7eb', color: index === monthIndex ? 'white' : 'black' }}
-                              >
-                                {m.month}
-                              </button>
-                            )
-                          })}
-                          {grade === 3 && (
-                            <button
-                              onClick={() => setMonthIndex(MONTHS.findIndex((m) => m.id === 'graduation'))}
-                              style={{ ...styles.monthTinyChip, backgroundColor: currentMonth.id === 'graduation' ? '#1d4ed8' : '#e5e7eb', color: currentMonth.id === 'graduation' ? 'white' : 'black' }}
-                            >
-                              卒
-                            </button>
-                          )}
-                        </div>
-                      </div>
-                    )
-                  })}
-                </div>
-
-                {playerType === '投手' ? (
-                  <>
-                    <div style={styles.summaryBlockTight}>
-                      <div style={styles.summaryTitle}>月合計（{monthPitchingSummary['試合数']}試合・投手）</div>
-                      <div style={styles.summaryLine}>{pitchingLine1(monthPitchingSummary)}</div>
-                      <div style={styles.summaryLine}>{pitchingLine2(monthPitchingSummary)}</div>
-                    </div>
-                    <div style={styles.summaryBlockTight}>
-                      <div style={styles.summaryTitle}>月合計（{monthBattingSummary['試合数']}試合・野手）</div>
-                      <div style={styles.summaryLine}>{battingLine1(monthBattingSummary)}</div>
-                      <div style={styles.summaryLine}>{battingLine2(monthBattingSummary)}</div>
-                    </div>
-                    <div style={styles.summaryBlockTight}>
-                      <div style={styles.summaryTitle}>通算（{careerPitchingSummary['試合数']}試合・投手）</div>
-                      <div style={styles.summaryLine}>{pitchingLine1(careerPitchingSummary)}</div>
-                      <div style={styles.summaryLine}>{pitchingLine2(careerPitchingSummary)}</div>
-                    </div>
-                    <div style={styles.summaryBlockTight}>
-                      <div style={styles.summaryTitle}>通算（{careerBattingSummary['試合数']}試合・野手）</div>
-                      <div style={styles.summaryLine}>{battingLine1(careerBattingSummary)}</div>
-                      <div style={styles.summaryLine}>{battingLine2(careerBattingSummary)}</div>
-                    </div>
-                  </>
-                ) : (
-                  <>
-                    <div style={styles.summaryBlockTight}>
-                      <div style={styles.summaryTitle}>月合計（{monthBattingSummary['試合数']}試合）</div>
-                      <div style={styles.summaryLine}>{battingLine1(monthBattingSummary)}</div>
-                      <div style={styles.summaryLine}>{battingLine2(monthBattingSummary)}</div>
-                    </div>
-                    <div style={styles.summaryBlockTight}>
-                      <div style={styles.summaryTitle}>通算（{careerBattingSummary['試合数']}試合）</div>
-                      <div style={styles.summaryLine}>{battingLine1(careerBattingSummary)}</div>
-                      <div style={styles.summaryLine}>{battingLine2(careerBattingSummary)}</div>
-                    </div>
-                  </>
-                )}
-              </div>
-            </div>
-
-            <div style={styles.card}>
-              <div style={styles.sectionHeader}>
-                <h3 style={styles.sectionTitle}>野手成績入力</h3>
-                <button style={styles.button} onClick={addBattingGame}>試合追加</button>
-              </div>
-              <div style={styles.gamesWrap}>
-                {currentData.battingGames.length === 0 ? (
-                  <div style={styles.emptyText}>まだ入力がありません</div>
-                ) : currentData.battingGames.map((game, index) => (
-                  <div key={index} style={styles.oneLineGameRow}>
-                    <div style={styles.gameIndex}>#{index + 1}</div>
-                    <MiniCheckField label="出場" checked={!!game.played} onChange={(v) => updateBattingGame(index, 'played', v)} />
-                    <MiniNumberField label="打数" value={game.atBats} onChange={(v) => updateBattingGame(index, 'atBats', v)} />
-                    <MiniNumberField label="安打" value={game.hits} onChange={(v) => updateBattingGame(index, 'hits', v)} />
-                    <MiniNumberField label="二塁打" value={game.doubles} onChange={(v) => updateBattingGame(index, 'doubles', v)} />
-                    <MiniNumberField label="三塁打" value={game.triples} onChange={(v) => updateBattingGame(index, 'triples', v)} />
-                    <MiniNumberField label="本塁打" value={game.homeRuns} onChange={(v) => updateBattingGame(index, 'homeRuns', v)} />
-                    <MiniNumberField label="打点" value={game.rbi} onChange={(v) => updateBattingGame(index, 'rbi', v)} />
-                    <MiniNumberField label="得点" value={game.runs} onChange={(v) => updateBattingGame(index, 'runs', v)} />
-                    <MiniNumberField label="盗塁" value={game.steals} onChange={(v) => updateBattingGame(index, 'steals', v)} />
-                    <MiniNumberField label="失策" value={game.errors} onChange={(v) => updateBattingGame(index, 'errors', v)} />
-                    <MiniNumberField label="四死球" value={game.walks} onChange={(v) => updateBattingGame(index, 'walks', v)} />
-                    <button style={styles.smallDeleteButton} onClick={() => deleteBattingGame(index)}>削除</button>
-                  </div>
-                ))}
-              </div>
-            </div>
-
-            {playerType === '投手' && (
               <div style={styles.card}>
                 <div style={styles.sectionHeader}>
-                  <h3 style={styles.sectionTitle}>投手成績入力</h3>
-                  <button style={styles.button} onClick={addPitchingGame}>試合追加</button>
+                  <h3 style={styles.sectionTitle}>野手成績入力</h3>
+                  <button style={styles.button} onClick={addBattingGame}>試合追加</button>
                 </div>
                 <div style={styles.gamesWrap}>
-                  {currentData.pitchingGames.length === 0 ? (
+                  {currentData.battingGames.length === 0 ? (
                     <div style={styles.emptyText}>まだ入力がありません</div>
-                  ) : currentData.pitchingGames.map((game, index) => (
+                  ) : currentData.battingGames.map((game, index) => (
                     <div key={index} style={styles.oneLineGameRow}>
                       <div style={styles.gameIndex}>#{index + 1}</div>
-                      <MiniCheckField label="登板" checked={!!game.played} onChange={(v) => updatePitchingGame(index, 'played', v)} />
-                      <MiniCheckField label="勝" checked={!!game.win} onChange={(v) => updatePitchingGame(index, 'win', v)} />
-                      <MiniCheckField label="敗" checked={!!game.loss} onChange={(v) => updatePitchingGame(index, 'loss', v)} />
-                      <MiniCheckField label="S" checked={!!game.save} onChange={(v) => updatePitchingGame(index, 'save', v)} />
-                      <MiniNumberField label="投球回" value={game.innings} onChange={(v) => updatePitchingGame(index, 'innings', v)} />
-                      <MiniNumberField label="被安打" value={game.hitsAllowed} onChange={(v) => updatePitchingGame(index, 'hitsAllowed', v)} />
-                      <MiniNumberField label="被本" value={game.homeRunsAllowed} onChange={(v) => updatePitchingGame(index, 'homeRunsAllowed', v)} />
-                      <MiniNumberField label="奪三振" value={game.strikeouts} onChange={(v) => updatePitchingGame(index, 'strikeouts', v)} />
-                      <MiniNumberField label="与四球" value={game.walksAllowed} onChange={(v) => updatePitchingGame(index, 'walksAllowed', v)} />
-                      <MiniNumberField label="失点" value={game.runsAllowed} onChange={(v) => updatePitchingGame(index, 'runsAllowed', v)} />
-                      <MiniNumberField label="自責" value={game.earnedRuns} onChange={(v) => updatePitchingGame(index, 'earnedRuns', v)} />
-                      <button style={styles.smallDeleteButton} onClick={() => deletePitchingGame(index)}>削除</button>
+                      <MiniCheckField label="出場" checked={!!game.played} onChange={(v) => updateBattingGame(index, 'played', v)} />
+                      <MiniNumberField label="打数" value={game.atBats} onChange={(v) => updateBattingGame(index, 'atBats', v)} />
+                      <MiniNumberField label="安打" value={game.hits} onChange={(v) => updateBattingGame(index, 'hits', v)} />
+                      <MiniNumberField label="二塁打" value={game.doubles} onChange={(v) => updateBattingGame(index, 'doubles', v)} />
+                      <MiniNumberField label="三塁打" value={game.triples} onChange={(v) => updateBattingGame(index, 'triples', v)} />
+                      <MiniNumberField label="本塁打" value={game.homeRuns} onChange={(v) => updateBattingGame(index, 'homeRuns', v)} />
+                      <MiniNumberField label="打点" value={game.rbi} onChange={(v) => updateBattingGame(index, 'rbi', v)} />
+                      <MiniNumberField label="得点" value={game.runs} onChange={(v) => updateBattingGame(index, 'runs', v)} />
+                      <MiniNumberField label="盗塁" value={game.steals} onChange={(v) => updateBattingGame(index, 'steals', v)} />
+                      <MiniNumberField label="失策" value={game.errors} onChange={(v) => updateBattingGame(index, 'errors', v)} />
+                      <MiniNumberField label="四死球" value={game.walks} onChange={(v) => updateBattingGame(index, 'walks', v)} />
+                      <button style={styles.smallDeleteButton} onClick={() => deleteBattingGame(index)}>削除</button>
                     </div>
                   ))}
                 </div>
               </div>
-            )}
-          </>
-        )}
+
+              {playerType === '投手' && (
+                <div style={styles.card}>
+                  <div style={styles.sectionHeader}>
+                    <h3 style={styles.sectionTitle}>投手成績入力</h3>
+                    <button style={styles.button} onClick={addPitchingGame}>試合追加</button>
+                  </div>
+                  <div style={styles.gamesWrap}>
+                    {currentData.pitchingGames.length === 0 ? (
+                      <div style={styles.emptyText}>まだ入力がありません</div>
+                    ) : currentData.pitchingGames.map((game, index) => (
+                      <div key={index} style={styles.oneLineGameRow}>
+                        <div style={styles.gameIndex}>#{index + 1}</div>
+                        <MiniCheckField label="登板" checked={!!game.played} onChange={(v) => updatePitchingGame(index, 'played', v)} />
+                        <MiniCheckField label="勝" checked={!!game.win} onChange={(v) => updatePitchingGame(index, 'win', v)} />
+                        <MiniCheckField label="敗" checked={!!game.loss} onChange={(v) => updatePitchingGame(index, 'loss', v)} />
+                        <MiniCheckField label="S" checked={!!game.save} onChange={(v) => updatePitchingGame(index, 'save', v)} />
+                        <MiniNumberField label="投球回" value={game.innings} onChange={(v) => updatePitchingGame(index, 'innings', v)} />
+                        <MiniNumberField label="被安打" value={game.hitsAllowed} onChange={(v) => updatePitchingGame(index, 'hitsAllowed', v)} />
+                        <MiniNumberField label="被本" value={game.homeRunsAllowed} onChange={(v) => updatePitchingGame(index, 'homeRunsAllowed', v)} />
+                        <MiniNumberField label="奪三振" value={game.strikeouts} onChange={(v) => updatePitchingGame(index, 'strikeouts', v)} />
+                        <MiniNumberField label="与四球" value={game.walksAllowed} onChange={(v) => updatePitchingGame(index, 'walksAllowed', v)} />
+                        <MiniNumberField label="失点" value={game.runsAllowed} onChange={(v) => updatePitchingGame(index, 'runsAllowed', v)} />
+                        <MiniNumberField label="自責" value={game.earnedRuns} onChange={(v) => updatePitchingGame(index, 'earnedRuns', v)} />
+                        <button style={styles.smallDeleteButton} onClick={() => deletePitchingGame(index)}>削除</button>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+            </>
+          )}
+        </div>
       </div>
-    </div>
+    </>
   )
 }
 
@@ -1330,6 +1356,28 @@ const styles = {
     padding: 20,
     boxSizing: 'border-box',
     boxShadow: '0 8px 24px rgba(0,0,0,0.08)'
+  },
+  modalOverlay: {
+    position: 'fixed',
+    inset: 0,
+    backgroundColor: 'rgba(0,0,0,0.35)',
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    zIndex: 1000,
+    padding: 16,
+    boxSizing: 'border-box',
+  },
+  modalCard: {
+    width: '100%',
+    maxWidth: 420,
+    backgroundColor: 'white',
+    borderRadius: 12,
+    padding: 18,
+    boxSizing: 'border-box',
+  },
+  modalField: {
+    marginBottom: 12,
   },
   app: {
     display: 'flex',
@@ -1474,9 +1522,10 @@ const styles = {
     textAlign: 'left',
     padding: '7px 10px',
     borderRadius: 8,
-    border: '1px solid #e5e7eb',
+    border: '1px solid rgba(0,0,0,0.08)',
     cursor: 'pointer',
     fontWeight: 'bold',
+    color: '#111827',
   },
   emptyText: {
     color: '#9ca3af',
@@ -1570,7 +1619,7 @@ const styles = {
     width: '100%',
     gap: 12,
   },
-  monthCompactWrap: {
+  periodCompactWrap: {
     display: 'grid',
     gap: 8,
     marginTop: 10,
@@ -1592,13 +1641,14 @@ const styles = {
     gap: 6,
   },
   monthTinyChip: {
-    minWidth: 32,
-    height: 28,
+    minWidth: 38,
+    height: 30,
     padding: '0 8px',
     borderRadius: 999,
     border: 'none',
     cursor: 'pointer',
-    fontSize: 13,
+    fontSize: 12,
+    fontWeight: 'bold',
   },
   summaryBlockTight: {
     backgroundColor: '#f8fafc',
