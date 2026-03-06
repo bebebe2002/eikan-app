@@ -123,6 +123,22 @@ function normalizePeriodData(data) {
   }
 }
 
+function stripImagesForLocal(players) {
+  return players.map((player) => ({
+    ...player,
+    periods: Object.fromEntries(
+      Object.entries(player.periods || {}).map(([periodId, periodData]) => [
+        periodId,
+        {
+          ...normalizePeriodData(periodData),
+          image: '',
+          subImage: '',
+        },
+      ])
+    ),
+  }))
+}
+
 function migratePlayer(player) {
   return {
     ...player,
@@ -464,82 +480,28 @@ export default function App() {
   const [addPlayerGeneration, setAddPlayerGeneration] = useState('')
 
   useEffect(() => {
-    async function init() {
-      const loaded = await loadData()
-      setPlayers(loaded.players)
-      setSettings(loaded.settings)
-      setSelectedPlayerId(loaded.players[0]?.id || '')
+    if (players.length === 0) return
+    const payload = { players, settings }
+    const localPayload = {
+      players: stripImagesForLocal(players),
+      settings,
     }
-    init()
-  }, [])
 
-  useEffect(() => {
-    const playerGenerations = Array.from(new Set(players.map((p) => p.generation).filter(Boolean)))
-    setSettings((prev) => {
-      const nextOrder = [...(Array.isArray(prev.generationOrder) ? prev.generationOrder : [])]
-      for (const generation of playerGenerations) {
-        if (!nextOrder.includes(generation)) nextOrder.push(generation)
-      }
-      const cleanedOrder = nextOrder.filter((generation) => playerGenerations.includes(generation) || generation.trim() !== '')
-      const currentVisible = Array.isArray(prev.visibleGenerations) ? [...prev.visibleGenerations] : []
-      for (const generation of cleanedOrder) {
-        if (!currentVisible.includes(generation)) currentVisible.push(generation)
-      }
-      const cleanedVisible = currentVisible.filter((generation) => cleanedOrder.includes(generation))
-      if (
-        JSON.stringify(cleanedOrder) === JSON.stringify(prev.generationOrder) &&
-        JSON.stringify(cleanedVisible) === JSON.stringify(prev.visibleGenerations)
-      ) {
-        return prev
-      }
-      return {
-        ...prev,
-        generationOrder: cleanedOrder,
-        visibleGenerations: cleanedVisible,
-      }
-    })
-  }, [players])
+    try {
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(localPayload))
+    } catch (error) {
+      console.error('localStorage save error:', error)
+    }
 
-  useEffect(() => {
-  if (players.length === 0) return
+    async function saveToSupabase() {
+      const { error } = await supabase
+        .from('app_state')
+        .upsert([{ id: APP_STATE_ID, data: payload }], { onConflict: 'id' })
+      if (error) console.error('Supabase save error:', error)
+    }
 
-  const payload = { players, settings }
-
-  const lightPlayers = players.map((player) => ({
-    ...player,
-    periods: Object.fromEntries(
-      Object.entries(player.periods || {}).map(([periodId, periodData]) => [
-        periodId,
-        {
-          ...periodData,
-          image: '',
-          subImage: '',
-        },
-      ])
-    ),
-  }))
-
-  const localPayload = {
-    players: lightPlayers,
-    settings,
-  }
-
-  try {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(localPayload))
-  } catch (e) {
-    console.error('localStorage save error:', e)
-  }
-
-  async function saveToSupabase() {
-    const { error } = await supabase
-      .from('app_state')
-      .upsert([{ id: APP_STATE_ID, data: payload }], { onConflict: 'id' })
-
-    if (error) console.error('Supabase save error:', error)
-  }
-
-  saveToSupabase()
-}, [players, settings])
+    saveToSupabase()
+  }, [players, settings])
 
   const generationOrder = useMemo(() => {
     const fromPlayers = Array.from(new Set(players.map((p) => p.generation).filter(Boolean)))
@@ -678,13 +640,58 @@ export default function App() {
     setSelectedPlayerId(nextPlayers[0]?.id || '')
   }
 
-  function handleImage(file, key = 'image') {
+  async function handleImage(file, key = 'image') {
     if (!selectedPlayer || !file) return
-    const reader = new FileReader()
-    reader.onload = () => {
-      updatePeriodData(selectedPlayer.id, currentPeriod.id, { [key]: reader.result })
+
+    const ext = file.name.split('.').pop() || 'png'
+    const filePath = `${selectedPlayer.id}/${currentPeriod.id}/${key}.${ext}`
+
+    const { error } = await supabase
+      .storage
+      .from('player-images')
+      .upload(filePath, file, {
+        upsert: true,
+        contentType: file.type,
+      })
+
+    if (error) {
+      console.error('Image upload error:', error)
+      alert('画像アップロード失敗')
+      return
     }
-    reader.readAsDataURL(file)
+
+    const { data } = supabase
+      .storage
+      .from('player-images')
+      .getPublicUrl(filePath)
+
+    updatePeriodData(selectedPlayer.id, currentPeriod.id, {
+      [key]: data.publicUrl,
+    })
+  }
+
+  async function deleteImage(key = 'image') {
+    if (!selectedPlayer) return
+
+    const imageUrl = currentData[key]
+    if (!imageUrl) return
+
+    const marker = '/storage/v1/object/public/player-images/'
+    const index = imageUrl.indexOf(marker)
+
+    if (index !== -1) {
+      const filePath = imageUrl.slice(index + marker.length)
+      const { error } = await supabase
+        .storage
+        .from('player-images')
+        .remove([filePath])
+
+      if (error) {
+        console.error('Image delete error:', error)
+      }
+    }
+
+    updatePeriodData(selectedPlayer.id, currentPeriod.id, { [key]: '' })
   }
 
   function updateBattingGame(index, key, value) {
@@ -1193,7 +1200,7 @@ export default function App() {
                       </div>
                       <div style={styles.buttonRow}>
                         <input type="file" accept="image/*" onChange={(e) => handleImage(e.target.files?.[0], 'image')} />
-                        <button style={styles.button} onClick={() => updatePeriodData(selectedPlayer.id, currentPeriod.id, { image: '' })}>画像削除</button>
+                        <button style={styles.button} onClick={() => deleteImage('image')}>画像削除</button>
                       </div>
                     </div>
 
@@ -1216,7 +1223,7 @@ export default function App() {
                         </div>
                         <div style={styles.buttonRow}>
                           <input type="file" accept="image/*" onChange={(e) => handleImage(e.target.files?.[0], 'subImage')} />
-                          <button style={styles.button} onClick={() => updatePeriodData(selectedPlayer.id, currentPeriod.id, { subImage: '' })}>画像削除</button>
+                          <button style={styles.button} onClick={() => deleteImage('subImage')}>画像削除</button>
                         </div>
                       </div>
                     )}
