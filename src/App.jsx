@@ -501,19 +501,45 @@ export default function App() {
   }, [players])
 
   useEffect(() => {
-    if (players.length === 0) return
-    const payload = { players, settings }
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(payload))
+  if (players.length === 0) return
 
-    async function saveToSupabase() {
-      const { error } = await supabase
-        .from('app_state')
-        .upsert([{ id: APP_STATE_ID, data: payload }], { onConflict: 'id' })
-      if (error) console.error('Supabase save error:', error)
-    }
+  const payload = { players, settings }
 
-    saveToSupabase()
-  }, [players, settings])
+  const lightPlayers = players.map((player) => ({
+    ...player,
+    periods: Object.fromEntries(
+      Object.entries(player.periods || {}).map(([periodId, periodData]) => [
+        periodId,
+        {
+          ...periodData,
+          image: '',
+          subImage: '',
+        },
+      ])
+    ),
+  }))
+
+  const localPayload = {
+    players: lightPlayers,
+    settings,
+  }
+
+  try {
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(localPayload))
+  } catch (e) {
+    console.error('localStorage save error:', e)
+  }
+
+  async function saveToSupabase() {
+    const { error } = await supabase
+      .from('app_state')
+      .upsert([{ id: APP_STATE_ID, data: payload }], { onConflict: 'id' })
+
+    if (error) console.error('Supabase save error:', error)
+  }
+
+  saveToSupabase()
+}, [players, settings])
 
   const generationOrder = useMemo(() => {
     const fromPlayers = Array.from(new Set(players.map((p) => p.generation).filter(Boolean)))
