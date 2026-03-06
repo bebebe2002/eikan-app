@@ -600,6 +600,35 @@ export default function App() {
   })
 }
 
+async function deleteImage(key = 'image') {
+  if (!selectedPlayer) return
+
+  const imageUrl = currentData[key]
+  if (!imageUrl) return
+
+  const marker = '/storage/v1/object/public/player-images/'
+  const index = imageUrl.indexOf(marker)
+
+  if (index !== -1) {
+    const filePath = imageUrl.slice(index + marker.length)
+
+    const { error } = await supabase
+      .storage
+      .from('player-images')
+      .remove([filePath])
+
+    if (error) {
+      console.error(error)
+      alert('画像削除失敗')
+      return
+    }
+  }
+
+  updateMonthData(selectedPlayer.id, currentMonth.id, {
+    [key]: ''
+  })
+}
+
   function groupedPlayers() {
     const result = {}
     for (const p of filteredPlayers) {
