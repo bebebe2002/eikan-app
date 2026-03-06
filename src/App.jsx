@@ -42,13 +42,22 @@ const DEFAULT_SETTINGS = {
 
 const MONTHS = (() => {
   const arr = []
-  const schoolOrder = [
-    { grade: 1, start: 4, end: 12 },
-    { grade: 1, start: 1, end: 3 },
-    { grade: 2, start: 4, end: 12 },
-    { grade: 2, start: 1, end: 3 },
-    { grade: 3, start: 4, end: 8 },
-  ]
+  const schoolOrder =[
+  { id: "1-in", label: "1年 入学式" },
+  { id: "1-summer", label: "1年 夏大会前" },
+  { id: "1-autumn", label: "1年 秋大会前" },
+  { id: "1-spring", label: "1年 春大会前" },
+
+  { id: "2-in", label: "2年 入学式" },
+  { id: "2-summer", label: "2年 夏大会前" },
+  { id: "2-autumn", label: "2年 秋大会前" },
+  { id: "2-spring", label: "2年 春大会前" },
+
+  { id: "3-in", label: "3年 入学式" },
+  { id: "3-summer", label: "3年 夏大会前" },
+
+  { id: "graduation", label: "卒業時" }
+]
 
   for (const block of schoolOrder) {
     for (let month = block.start; month <= block.end; month++) {
@@ -624,12 +633,14 @@ export default function App() {
     setSelectedPlayerId(nextPlayers[0]?.id || '')
   }
 
-  function handleImage(file, key = 'image') {
-    if (!selectedPlayer || !file) return
-    const reader = new FileReader()
-    reader.onload = () => updateMonthData(selectedPlayer.id, currentMonth.id, { [key]: reader.result })
-    reader.readAsDataURL(file)
+  function handleImage(file) {
+  if (!selectedPlayer || !file) return
+  const reader = new FileReader()
+  reader.onload = () => {
+    updatePlayer(selectedPlayer.id, { image: reader.result })
   }
+  reader.readAsDataURL(file)
+}
 
   function updateBattingGame(index, key, value) {
     const next = [...currentData.battingGames]
@@ -1119,15 +1130,15 @@ export default function App() {
                         if (file) handleImage(file, 'image')
                       }}
                     >
-                      {currentData.image ? (
-                        <img src={currentData.image} alt="player" style={styles.image} />
+                      {selectedPlayer.image ? (
+                        <img src={selectedPlayer.image} alt="player" style={styles.image} />
                       ) : (
                         <div>ここに画像をドラッグ＆ドロップ</div>
                       )}
                     </div>
                     <div style={styles.buttonRow}>
                       <input type="file" accept="image/*" onChange={(e) => handleImage(e.target.files?.[0], 'image')} />
-                      <button style={styles.button} onClick={() => updateMonthData(selectedPlayer.id, currentMonth.id, { image: '' })}>画像削除</button>
+                      <button style={styles.button} onClick={() => updatePlayer(selectedPlayer.id, { image: '' })}>画像削除</button>
                     </div>
                   </div>
 
