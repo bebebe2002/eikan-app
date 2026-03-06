@@ -146,27 +146,6 @@ function migratePlayer(player) {
   }
 }
 
-function stripLegacyBase64FromPlayer(player) {
-  const nextPeriods = Object.fromEntries(
-    Object.entries(player.periods || {}).map(([periodId, periodData]) => {
-      const normalized = normalizePeriodData(periodData)
-      return [
-        periodId,
-        {
-          ...normalized,
-          image: typeof normalized.image === 'string' && normalized.image.startsWith('data:') ? '' : normalized.image,
-          subImage: typeof normalized.subImage === 'string' && normalized.subImage.startsWith('data:') ? '' : normalized.subImage,
-        },
-      ]
-    })
-  )
-
-  return {
-    ...player,
-    periods: nextPeriods,
-  }
-}
-
 function normalizeSettings(rawSettings = {}, players = []) {
   const merged = { ...DEFAULT_SETTINGS, ...(rawSettings || {}) }
   const playerGenerations = Array.from(new Set(players.map((p) => p.generation).filter(Boolean)))
@@ -201,9 +180,7 @@ async function loadData() {
 
     if (!error && data?.data) {
       const parsed = data.data
-      const players = Array.isArray(parsed.players)
-  ? parsed.players.map(migratePlayer).map(stripLegacyBase64FromPlayer)
-  : [createPlayer()]
+      const players = Array.isArray(parsed.players) ? parsed.players.map(migratePlayer) : [createPlayer()]
       return {
         players,
         settings: normalizeSettings(parsed.settings || {}, players),
@@ -223,9 +200,7 @@ async function loadData() {
     }
 
     const parsed = JSON.parse(raw)
-    const players = Array.isArray(parsed.players)
-  ? parsed.players.map(migratePlayer).map(stripLegacyBase64FromPlayer)
-  : [createPlayer()]
+    const players = Array.isArray(parsed.players) ? parsed.players.map(migratePlayer) : [createPlayer()]
     return {
       players,
       settings: normalizeSettings(parsed.settings || {}, players),
@@ -236,9 +211,7 @@ async function loadData() {
       const raw = localStorage.getItem(STORAGE_KEY)
       if (raw) {
         const parsed = JSON.parse(raw)
-        const players = Array.isArray(parsed.players)
-  ? parsed.players.map(migratePlayer).map(stripLegacyBase64FromPlayer)
-  : [createPlayer()]
+        const players = Array.isArray(parsed.players) ? parsed.players.map(migratePlayer) : [createPlayer()]
         return {
           players,
           settings: normalizeSettings(parsed.settings || {}, players),
@@ -500,11 +473,21 @@ export default function App() {
   const [expandedGenerations, setExpandedGenerations] = useState({})
   const [expandedTypes, setExpandedTypes] = useState({})
   const [openSettingsSections, setOpenSettingsSections] = useState({
-    display: true,
-    generations: true,
-    summary: false,
-  })
-  const [addPlayerGeneration, setAddPlayerGeneration] = useState('')
+  display: true,
+  generations: true,
+  summary: false,
+})
+const [addPlayerGeneration, setAddPlayerGeneration] = useState('')
+
+useEffect(() => {
+  async function init() {
+    const loaded = await loadData()
+    setPlayers(loaded.players)
+    setSettings(loaded.settings)
+    setSelectedPlayerId(loaded.players[0]?.id || '')
+  }
+  init()
+}, [])
 
   useEffect(() => {
     if (players.length === 0) return
