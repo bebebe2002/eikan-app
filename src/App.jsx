@@ -3,6 +3,8 @@ import { supabase } from './supabase'
 
 const STORAGE_KEY = 'eikan-file-manager-v8'
 const APP_STATE_ID = '11111111-1111-1111-1111-111111111111'
+const AUTH_KEY = 'eikan-auth-ok'
+const AUTH_PASSWORD = 'nagata'
 
 const POSITIONS = ['投手', '捕手', '一塁手', '二塁手', '三塁手', '遊撃手', '外野手']
 const ALL_BATTING_FIELDS = ['打率', '打数', '安打', '本塁打', '打点', '得点', '盗塁', '失策', '出塁率', '長打率', 'OPS']
@@ -349,6 +351,8 @@ export default function App() {
   const [typeFilter, setTypeFilter] = useState('すべて')
   const [searchText, setSearchText] = useState('')
   const [mode, setMode] = useState('main')
+  const [passwordInput, setPasswordInput] = useState('')
+  const [isUnlocked, setIsUnlocked] = useState(() => localStorage.getItem(AUTH_KEY) === 'ok')
 
   useEffect(() => {
     async function init() {
@@ -361,60 +365,25 @@ export default function App() {
   }, [])
 
   useEffect(() => {
+    if (players.length === 0) return
 
-  async function refreshData() {
-    const loaded = await loadData()
-    setPlayers(loaded.players)
-    setSettings(loaded.settings)
-  }
+    const payload = { players, settings }
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(payload))
 
-  
+    async function saveToSupabase() {
+      const { error } = await supabase
+        .from('app_state')
+        .upsert([{ id: APP_STATE_ID, data: payload }], { onConflict: 'id' })
 
-  function handleFocus() {
-    refreshData()
-  }
-
-  window.addEventListener("focus", handleFocus)
-
-  return () => {
-    window.removeEventListener("focus", handleFocus)
-  }
-
-}, [])
-
-  useEffect(() => {
-  if (players.length === 0) return
-
-  console.log('SAVE EFFECT STARTED')
-
-  const payload = { players, settings }
-
-  localStorage.setItem(STORAGE_KEY, JSON.stringify(payload))
-
-  async function saveToSupabase() {
-
-    console.log('TRY SAVE TO SUPABASE')
-
-    const { data, error } = await supabase
-      .from('app_state')
-      .upsert(
-        [{ id: APP_STATE_ID, data: payload }],
-        { onConflict: 'id' }
-      )
-
-    console.log('SAVE RESULT', { data, error })
-
-    if (error) {
-      console.error('Supabase save error:', error)
-      alert(`Supabase save error: ${error.message}`)
-    } else {
-      console.log('Supabase save success')
+      if (error) {
+        console.error('Supabase save error:', error)
+      } else {
+        console.log('Supabase save success')
+      }
     }
-  }
 
-  saveToSupabase()
-
-}, [players, settings])
+    saveToSupabase()
+  }, [players, settings])
 
   const generations = useMemo(() => ['すべて', ...Array.from(new Set(players.map((p) => p.generation)))], [players])
 
@@ -511,56 +480,6 @@ export default function App() {
     setMode('main')
   }
 
-  function exportBackup() {
-
-  const data = {
-    players,
-    settings
-  }
-
-  const blob = new Blob(
-    [JSON.stringify(data, null, 2)],
-    { type: "application/json" }
-  )
-
-  const url = URL.createObjectURL(blob)
-
-  const a = document.createElement("a")
-  a.href = url
-  a.download = `eikan_backup_${new Date().toISOString().slice(0,10)}.json`
-
-  a.click()
-
-  URL.revokeObjectURL(url)
-}
-
-  function importBackup(file) {
-
-  const reader = new FileReader()
-
-  reader.onload = (e) => {
-
-    try {
-
-      const data = JSON.parse(e.target.result)
-
-      if (data.players) setPlayers(data.players)
-      if (data.settings) setSettings(data.settings)
-
-      alert("バックアップ読み込み成功")
-
-    } catch {
-
-      alert("バックアップファイルが不正です")
-
-    }
-
-  }
-
-  reader.readAsText(file)
-
-}
-
   function deleteSelectedPlayer() {
     if (!selectedPlayer) return
     const ok = window.confirm(`${selectedPlayer.name} を削除しますか？`)
@@ -570,64 +489,12 @@ export default function App() {
     setSelectedPlayerId(nextPlayers[0]?.id || '')
   }
 
-  async function handleImage(file, key = 'image') {
-  if (!selectedPlayer || !file) return
-
-  const ext = file.name.split('.').pop()
-  const filePath = `${selectedPlayer.id}/${currentMonth.id}/${key}.${ext}`
-
-  const { error } = await supabase
-    .storage
-    .from('player-images')
-    .upload(filePath, file, {
-      upsert: true,
-      contentType: file.type,
-    })
-
-  if (error) {
-    console.error(error)
-    alert('画像アップロード失敗')
-    return
+  function handleImage(file, key = 'image') {
+    if (!selectedPlayer || !file) return
+    const reader = new FileReader()
+    reader.onload = () => updateMonthData(selectedPlayer.id, currentMonth.id, { [key]: reader.result })
+    reader.readAsDataURL(file)
   }
-
-  const { data } = supabase
-    .storage
-    .from('player-images')
-    .getPublicUrl(filePath)
-
-  updateMonthData(selectedPlayer.id, currentMonth.id, {
-    [key]: data.publicUrl
-  })
-}
-
-async function deleteImage(key = 'image') {
-  if (!selectedPlayer) return
-
-  const imageUrl = currentData[key]
-  if (!imageUrl) return
-
-  const marker = '/storage/v1/object/public/player-images/'
-  const index = imageUrl.indexOf(marker)
-
-  if (index !== -1) {
-    const filePath = imageUrl.slice(index + marker.length)
-
-    const { error } = await supabase
-      .storage
-      .from('player-images')
-      .remove([filePath])
-
-    if (error) {
-      console.error(error)
-      alert('画像削除失敗')
-      return
-    }
-  }
-
-  updateMonthData(selectedPlayer.id, currentMonth.id, {
-    [key]: ''
-  })
-}
 
   function groupedPlayers() {
     const result = {}
@@ -676,7 +543,73 @@ async function deleteImage(key = 'image') {
     }))
   }
 
+  function exportBackup() {
+    const data = { players, settings }
+    const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' })
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    a.href = url
+    a.download = `eikan_backup_${new Date().toISOString().slice(0, 10)}.json`
+    a.click()
+    URL.revokeObjectURL(url)
+  }
+
+  function importBackup(file) {
+    if (!file) return
+    const reader = new FileReader()
+    reader.onload = (e) => {
+      try {
+        const data = JSON.parse(e.target?.result)
+        if (data.players) setPlayers(data.players)
+        if (data.settings) setSettings(data.settings)
+        alert('バックアップ読み込み成功')
+      } catch {
+        alert('バックアップファイルが不正です')
+      }
+    }
+    reader.readAsText(file)
+  }
+
   const groups = groupedPlayers()
+
+  function handleUnlock() {
+    if (passwordInput === AUTH_PASSWORD) {
+      localStorage.setItem(AUTH_KEY, 'ok')
+      setIsUnlocked(true)
+      setPasswordInput('')
+    } else {
+      alert('パスワードが違います')
+    }
+  }
+
+  function handleLogout() {
+    localStorage.removeItem(AUTH_KEY)
+    setIsUnlocked(false)
+  }
+
+  if (!isUnlocked) {
+    return (
+      <div style={styles.authWrap}>
+        <div style={styles.authCard}>
+          <h2 style={{ marginTop: 0, marginBottom: 12 }}>栄冠ナイン管理</h2>
+          <div style={{ marginBottom: 10 }}>パスワードを入力してください</div>
+          <input
+            type="password"
+            value={passwordInput}
+            onChange={(e) => setPasswordInput(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter') handleUnlock()
+            }}
+            style={styles.input}
+            placeholder="パスワード"
+          />
+          <button style={{ ...styles.button, width: '100%', marginTop: 10 }} onClick={handleUnlock}>
+            入室
+          </button>
+        </div>
+      </div>
+    )
+  }
 
   return (
     <div style={styles.app}>
@@ -702,26 +635,18 @@ async function deleteImage(key = 'image') {
         </div>
 
         <div style={styles.buttonRow}>
-  <button onClick={() => addPlayer('投手')} style={styles.button}>
-    投手追加
-  </button>
-  <button onClick={() => addPlayer('野手')} style={styles.button}>
-    野手追加
-  </button>
-</div>
+          <button onClick={() => addPlayer('投手')} style={styles.button}>投手追加</button>
+          <button onClick={() => addPlayer('野手')} style={styles.button}>野手追加</button>
+        </div>
 
-<div style={styles.buttonRow}>
-  <button style={styles.button} onClick={exportBackup}>
-    バックアップ保存
-  </button>
-
-  <input
-    type="file"
-    accept=".json"
-    onChange={(e)=>importBackup(e.target.files[0])}
-  />
-</div>
-        
+        <div style={styles.buttonRow}>
+          <button style={styles.button} onClick={exportBackup}>バックアップ保存</button>
+          <input
+            type="file"
+            accept=".json"
+            onChange={(e) => importBackup(e.target.files?.[0])}
+          />
+        </div>
 
         <div style={styles.treeArea}>
           {Object.keys(groups).length === 0 ? (
@@ -840,7 +765,10 @@ async function deleteImage(key = 'image') {
                   </div>
                 </div>
               </div>
-              <button onClick={deleteSelectedPlayer} style={{ ...styles.button, backgroundColor: '#fee2e2' }}>選手削除</button>
+              <div style={styles.buttonRow}>
+                <button onClick={handleLogout} style={styles.button}>ロック</button>
+                <button onClick={deleteSelectedPlayer} style={{ ...styles.button, backgroundColor: '#fee2e2' }}>選手削除</button>
+              </div>
             </div>
 
             <div style={styles.infoCard}>
@@ -888,7 +816,7 @@ async function deleteImage(key = 'image') {
                     </div>
                     <div style={styles.buttonRow}>
                       <input type="file" accept="image/*" onChange={(e) => handleImage(e.target.files?.[0], 'image')} />
-                      <button style={styles.button} onClick={() => deleteImage('image')}>画像削除</button>
+                      <button style={styles.button} onClick={() => updateMonthData(selectedPlayer.id, currentMonth.id, { image: '' })}>画像削除</button>
                     </div>
                   </div>
 
@@ -911,7 +839,7 @@ async function deleteImage(key = 'image') {
                       </div>
                       <div style={styles.buttonRow}>
                         <input type="file" accept="image/*" onChange={(e) => handleImage(e.target.files?.[0], 'subImage')} />
-                        <button style={styles.button} onClick={() => deleteImage('subImage')}>画像削除</button>
+                        <button style={styles.button} onClick={() => updateMonthData(selectedPlayer.id, currentMonth.id, { subImage: '' })}>画像削除</button>
                       </div>
                     </div>
                   )}
@@ -1063,6 +991,24 @@ async function deleteImage(key = 'image') {
 }
 
 const styles = {
+  authWrap: {
+    minHeight: '100vh',
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: '#f3f4f6',
+    padding: 16,
+    boxSizing: 'border-box'
+  },
+  authCard: {
+    width: '100%',
+    maxWidth: 360,
+    backgroundColor: 'white',
+    borderRadius: 12,
+    padding: 20,
+    boxSizing: 'border-box',
+    boxShadow: '0 8px 24px rgba(0,0,0,0.08)'
+  },
   app: {
     display: 'flex',
     minHeight: '100vh',
