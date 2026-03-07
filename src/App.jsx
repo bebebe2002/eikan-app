@@ -1,12 +1,14 @@
 import { useEffect, useMemo, useState } from 'react'
 import { supabase } from './supabase'
 
-const STORAGE_KEY = 'eikan-file-manager-v11'
+const STORAGE_KEY = 'eikan-file-manager-v10'
 const APP_STATE_ID = '11111111-1111-1111-1111-111111111111'
 const AUTH_KEY = 'eikan-auth-ok'
 const AUTH_PASSWORD = 'nagata'
 
 const POSITIONS = ['投手', '捕手', '一塁手', '二塁手', '三塁手', '遊撃手', '外野手']
+const TYPE_ORDER = ['投手', '野手']
+const INFIELDER_POSITIONS = ['一塁手', '二塁手', '三塁手', '遊撃手']
 const POSITION_SORT_ORDER = {
   投手: 0,
   捕手: 1,
@@ -33,68 +35,8 @@ const DEFAULT_SETTINGS = {
   battingSummaryFields: ALL_BATTING_FIELDS,
   pitchingSummaryFields: ALL_PITCHING_FIELDS,
   visibleGenerations: [],
+  visibleTypes: [...TYPE_ORDER],
   generationOrder: [],
-}
-
-const PERIODS = [
-  { id: '1-in', label: '1年 入学式', short: '入', grade: 1 },
-  { id: '1-summer', label: '1年 夏前', short: '夏前', grade: 1 },
-  { id: '1-autumn', label: '1年 秋前', short: '秋前', grade: 1 },
-  { id: '1-spring', label: '1年 春前', short: '春前', grade: 1 },
-
-  { id: '2-in', label: '2年 入学式', short: '入', grade: 2 },
-  { id: '2-summer', label: '2年 夏前', short: '夏前', grade: 2 },
-  { id: '2-autumn', label: '2年 秋前', short: '秋前', grade: 2 },
-  { id: '2-spring', label: '2年 春前', short: '春前', grade: 2 },
-
-  { id: '3-in', label: '3年 入学式', short: '入', grade: 3 },
-  { id: '3-summer', label: '3年 夏前', short: '夏前', grade: 3 },
-  { id: 'graduation', label: '卒業時', short: '卒', grade: 3 },
-]
-
-const PERIOD_GAME_LABELS = {
-  '1-in': ['#1', '#2', '#3'],
-  '2-in': ['#1', '#2', '#3'],
-  '3-in': ['#1', '#2', '#3'],
-
-  '1-summer': [
-    '県大会一回戦', '県大会二回戦', '県大会三回戦',
-    '県大会準々決勝', '県大会準決勝', '県大会決勝',
-    '甲子園一回戦', '甲子園二回戦', '甲子園三回戦',
-    '甲子園準々決勝', '甲子園準決勝', '甲子園決勝',
-  ],
-  '2-summer': [
-    '県大会一回戦', '県大会二回戦', '県大会三回戦',
-    '県大会準々決勝', '県大会準決勝', '県大会決勝',
-    '甲子園一回戦', '甲子園二回戦', '甲子園三回戦',
-    '甲子園準々決勝', '甲子園準決勝', '甲子園決勝',
-  ],
-  '3-summer': [
-    '県大会一回戦', '県大会二回戦', '県大会三回戦',
-    '県大会準々決勝', '県大会準決勝', '県大会決勝',
-    '甲子園一回戦', '甲子園二回戦', '甲子園三回戦',
-    '甲子園準々決勝', '甲子園準決勝', '甲子園決勝',
-  ],
-
-  '1-autumn': [
-    '県大会一回戦', '県大会二回戦',
-    '地方大会一回戦', '地方大会二回戦',
-    '全国大会二回戦', '全国大会準決勝', '全国大会決勝',
-  ],
-  '2-autumn': [
-    '県大会一回戦', '県大会二回戦',
-    '地方大会一回戦', '地方大会二回戦',
-    '全国大会二回戦', '全国大会準決勝', '全国大会決勝',
-  ],
-
-  '1-spring': [
-    '甲子園一回戦', '甲子園二回戦',
-    '甲子園準々決勝', '甲子園準決勝', '甲子園決勝',
-  ],
-  '2-spring': [
-    '甲子園一回戦', '甲子園二回戦',
-    '甲子園準々決勝', '甲子園準決勝', '甲子園決勝',
-  ],
 }
 
 function ensureGenerationLabel(value) {
@@ -103,23 +45,27 @@ function ensureGenerationLabel(value) {
   return trimmed.endsWith('世代') ? trimmed : `${trimmed}世代`
 }
 
+const MONTHS = [
+  { id: '1-in', label: '1年 入学式', short: '入', grade: 1 },
+  { id: '1-summer', label: '1年 夏前', short: '夏前', grade: 1 },
+  { id: '1-autumn', label: '1年 秋前', short: '秋前', grade: 1 },
+  { id: '1-spring', label: '1年 春前', short: '春前', grade: 1 },
+  { id: '2-in', label: '2年 入学式', short: '入', grade: 2 },
+  { id: '2-summer', label: '2年 夏前', short: '夏前', grade: 2 },
+  { id: '2-autumn', label: '2年 秋前', short: '秋前', grade: 2 },
+  { id: '2-spring', label: '2年 春前', short: '春前', grade: 2 },
+  { id: '3-in', label: '3年 入学式', short: '入', grade: 3 },
+  { id: '3-summer', label: '3年 夏前', short: '夏前', grade: 3 },
+  { id: 'graduation', label: '卒業時', short: '卒', grade: 3 },
+]
+
 function getTypeFromPosition(position) {
   return position === '投手' ? '投手' : '野手'
 }
 
-function isNationalPeriod(periodObj) {
-  if (!periodObj) return false
-  return ['1-summer', '1-autumn', '1-spring', '2-summer', '2-autumn', '2-spring', '3-summer'].includes(periodObj.id)
-}
-
-function getPeriodTitle(period) {
-  if (!period) return '成績'
-  if (period.id === 'graduation') return ''
-  if (period.id.includes('summer')) return '夏大会成績'
-  if (period.id.includes('autumn')) return '秋大会成績'
-  if (period.id.includes('spring')) return '春大会成績'
-  if (period.id.includes('in')) return '練習試合成績'
-  return '成績'
+function isNationalMonth(monthObj) {
+  if (!monthObj) return false
+  return ['1-summer', '1-autumn', '1-spring', '2-summer', '2-autumn', '2-spring', '3-summer'].includes(monthObj.id)
 }
 
 function emptyBattingGame() {
@@ -209,22 +155,24 @@ function migratePlayer(player) {
 
 function normalizeSettings(rawSettings = {}, players = []) {
   const merged = { ...DEFAULT_SETTINGS, ...(rawSettings || {}) }
-  const playerGenerations = Array.from(new Set(players.map((p) => ensureGenerationLabel(p.generation)).filter(Boolean)))
-  const baseOrder = Array.isArray(merged.generationOrder) ? merged.generationOrder.map(ensureGenerationLabel) : []
+  const playerGenerations = Array.from(new Set(players.map((p) => p.generation).filter(Boolean)))
+  const baseOrder = Array.isArray(merged.generationOrder) ? merged.generationOrder : []
   const generationOrder = [...baseOrder.filter((g) => playerGenerations.includes(g))]
-
   for (const generation of playerGenerations) {
     if (!generationOrder.includes(generation)) generationOrder.push(generation)
   }
 
   const visibleGenerations = Array.isArray(merged.visibleGenerations)
-    ? merged.visibleGenerations.map(ensureGenerationLabel).filter((g) => generationOrder.includes(g))
+    ? merged.visibleGenerations.filter((g) => generationOrder.includes(g))
     : generationOrder
 
   return {
     battingSummaryFields: Array.isArray(merged.battingSummaryFields) ? merged.battingSummaryFields : ALL_BATTING_FIELDS,
     pitchingSummaryFields: Array.isArray(merged.pitchingSummaryFields) ? merged.pitchingSummaryFields : ALL_PITCHING_FIELDS,
     visibleGenerations,
+    visibleTypes: Array.isArray(merged.visibleTypes) && merged.visibleTypes.length > 0
+      ? merged.visibleTypes.filter((t) => TYPE_ORDER.includes(t))
+      : [...TYPE_ORDER],
     generationOrder,
   }
 }
@@ -488,7 +436,7 @@ function AddPlayerModal({ generation, onClose, onSubmit }) {
   return (
     <div style={styles.modalOverlay} onClick={onClose}>
       <div style={styles.modalCard} onClick={(e) => e.stopPropagation()}>
-        <h3 style={{ marginTop: 0, marginBottom: 12 }}>{generation} に選手追加</h3>
+        <h3 style={{ marginTop: 0, marginBottom: 12 }}>{generation}に選手追加</h3>
         <div style={styles.modalField}>
           <div style={styles.label}>選手名</div>
           <input style={styles.input} value={name} onChange={(e) => setName(e.target.value)} placeholder="選手名" />
@@ -530,6 +478,7 @@ export default function App() {
   const [passwordInput, setPasswordInput] = useState('')
   const [isUnlocked, setIsUnlocked] = useState(() => localStorage.getItem(AUTH_KEY) === 'ok')
   const [expandedGenerations, setExpandedGenerations] = useState({})
+  const [expandedTypes, setExpandedTypes] = useState({})
   const [openSettingsSections, setOpenSettingsSections] = useState({
     display: true,
     generations: true,
@@ -550,41 +499,7 @@ export default function App() {
   }, [])
 
   useEffect(() => {
-    const playerGenerations = Array.from(new Set(players.map((p) => ensureGenerationLabel(p.generation)).filter(Boolean)))
-
-    setSettings((prev) => {
-      const nextOrder = [...(Array.isArray(prev.generationOrder) ? prev.generationOrder.map(ensureGenerationLabel) : [])]
-      for (const generation of playerGenerations) {
-        if (!nextOrder.includes(generation)) nextOrder.push(generation)
-      }
-
-      const cleanedOrder = nextOrder.filter((generation) => playerGenerations.includes(generation) || generation.trim() !== '')
-      const currentVisible = Array.isArray(prev.visibleGenerations) ? prev.visibleGenerations.map(ensureGenerationLabel) : []
-
-      for (const generation of cleanedOrder) {
-        if (!currentVisible.includes(generation)) currentVisible.push(generation)
-      }
-
-      const cleanedVisible = currentVisible.filter((generation) => cleanedOrder.includes(generation))
-
-      if (
-        JSON.stringify(cleanedOrder) === JSON.stringify(prev.generationOrder) &&
-        JSON.stringify(cleanedVisible) === JSON.stringify(prev.visibleGenerations)
-      ) {
-        return prev
-      }
-
-      return {
-        ...prev,
-        generationOrder: cleanedOrder,
-        visibleGenerations: cleanedVisible,
-      }
-    })
-  }, [players])
-
-  useEffect(() => {
     if (players.length === 0) return
-
     const payload = { players, settings }
     const localPayload = {
       players: stripImagesForLocal(players),
@@ -621,21 +536,25 @@ export default function App() {
     return generationOrder.filter((generation) => settings.visibleGenerations.includes(generation))
   }, [generationOrder, settings.visibleGenerations])
 
+  const effectiveVisibleTypes = useMemo(() => {
+    if (!settings.visibleTypes || settings.visibleTypes.length === 0) return TYPE_ORDER
+    return TYPE_ORDER.filter((type) => settings.visibleTypes.includes(type))
+  }, [settings.visibleTypes])
+
   const filteredPlayers = useMemo(() => {
     const keyword = searchText.trim().toLowerCase()
     return players.filter((p) => {
       const okGeneration = effectiveVisibleGenerations.includes(p.generation)
+      const okType = effectiveVisibleTypes.includes(getTypeFromPosition(p.position))
       const okSearch = keyword === '' || p.name.toLowerCase().includes(keyword) || (p.tags || '').toLowerCase().includes(keyword)
-      return okGeneration && okSearch
+      return okGeneration && okType && okSearch
     })
-  }, [players, effectiveVisibleGenerations, searchText])
+  }, [players, effectiveVisibleGenerations, effectiveVisibleTypes, searchText])
 
   const selectedPlayer = players.find((p) => p.id === selectedPlayerId) || players[0] || null
   const playerType = selectedPlayer ? getTypeFromPosition(selectedPlayer.position) : '野手'
-  const currentPeriod = PERIODS[periodIndex]
+  const currentPeriod = MONTHS[periodIndex]
   const currentData = normalizePeriodData(selectedPlayer?.periods?.[currentPeriod.id])
-  const isGraduation = currentPeriod?.id === 'graduation'
-  const currentGameLabels = PERIOD_GAME_LABELS[currentPeriod?.id] || []
 
   useEffect(() => {
     if (!selectedPlayer && filteredPlayers[0]) {
@@ -643,8 +562,8 @@ export default function App() {
     }
   }, [selectedPlayer, filteredPlayers])
 
-  const periodBattingSummary = battingSummaryObject(sumBattingGames(currentData.battingGames))
-  const periodPitchingSummary = pitchingSummaryObject(sumPitchingGames(currentData.pitchingGames))
+  const monthBattingSummary = battingSummaryObject(sumBattingGames(currentData.battingGames))
+  const monthPitchingSummary = pitchingSummaryObject(sumPitchingGames(currentData.pitchingGames))
 
   const careerBattingSummary = useMemo(() => {
     if (!selectedPlayer) return battingSummaryObject(sumBattingGames([]))
@@ -667,8 +586,8 @@ export default function App() {
   const nationalBattingSummary = useMemo(() => {
     if (!selectedPlayer) return battingSummaryObject(sumBattingGames([]))
     const games = []
-    for (const periodObj of PERIODS) {
-      if (!isNationalPeriod(periodObj)) continue
+    for (const periodObj of MONTHS) {
+      if (!isNationalMonth(periodObj)) continue
       games.push(...normalizePeriodData(selectedPlayer.periods?.[periodObj.id]).battingGames)
     }
     return battingSummaryObject(sumBattingGames(games))
@@ -677,8 +596,8 @@ export default function App() {
   const nationalPitchingSummary = useMemo(() => {
     if (!selectedPlayer) return pitchingSummaryObject(sumPitchingGames([]))
     const games = []
-    for (const periodObj of PERIODS) {
-      if (!isNationalPeriod(periodObj)) continue
+    for (const periodObj of MONTHS) {
+      if (!isNationalMonth(periodObj)) continue
       games.push(...normalizePeriodData(selectedPlayer.periods?.[periodObj.id]).pitchingGames)
     }
     return pitchingSummaryObject(sumPitchingGames(games))
@@ -714,10 +633,31 @@ export default function App() {
     }
     setSettings((prev) => ({
       ...prev,
-      generationOrder: [...generationOrder, name],
+      generationOrder: [...(prev.generationOrder || []), name],
       visibleGenerations: [...(prev.visibleGenerations || []), name],
     }))
     setExpandedGenerations((prev) => ({ ...prev, [name]: true }))
+  }
+
+  function deleteGeneration(generation) {
+    const ok = window.confirm(`${generation} を削除しますか？
+この世代の選手も削除されます。`)
+    if (!ok) return
+
+    setPlayers((prev) => prev.filter((player) => player.generation !== generation))
+    setSettings((prev) => ({
+      ...prev,
+      generationOrder: (prev.generationOrder || []).filter((g) => g !== generation),
+      visibleGenerations: (prev.visibleGenerations || []).filter((g) => g !== generation),
+    }))
+    setExpandedGenerations((prev) => {
+      const next = { ...prev }
+      delete next[generation]
+      return next
+    })
+    if (selectedPlayer?.generation === generation) {
+      setSelectedPlayerId('')
+    }
   }
 
   function submitAddPlayer(name, position) {
@@ -727,6 +667,7 @@ export default function App() {
     setPlayers((prev) => [...prev, newPlayer])
     setSelectedPlayerId(newPlayer.id)
     setExpandedGenerations((prev) => ({ ...prev, [generation]: true }))
+    setExpandedTypes((prev) => ({ ...prev, [`${generation}-${getTypeFromPosition(position)}`]: true }))
     setAddPlayerGeneration('')
     setMode('main')
   }
@@ -842,6 +783,17 @@ export default function App() {
     })
   }
 
+  function toggleTypeVisibility(type) {
+    setSettings((prev) => {
+      const current = prev.visibleTypes || []
+      const exists = current.includes(type)
+      return {
+        ...prev,
+        visibleTypes: exists ? current.filter((t) => t !== type) : [...current, type],
+      }
+    })
+  }
+
   function renameGeneration(oldGeneration, nextGenerationRaw) {
     const nextGeneration = ensureGenerationLabel(nextGenerationRaw)
     if (!nextGeneration || nextGeneration === oldGeneration) return
@@ -869,10 +821,8 @@ export default function App() {
       return next
     })
 
-    if (editingGeneration === oldGeneration) {
-      setEditingGeneration('')
-      setEditingGenerationValue('')
-    }
+    setEditingGeneration('')
+    setEditingGenerationValue('')
   }
 
   function beginEditGeneration(generation) {
@@ -898,6 +848,11 @@ export default function App() {
 
   function toggleGenerationOpen(generation) {
     setExpandedGenerations((prev) => ({ ...prev, [generation]: !prev[generation] }))
+  }
+
+  function toggleTypeOpen(generation, type) {
+    const key = `${generation}-${type}`
+    setExpandedTypes((prev) => ({ ...prev, [key]: !prev[key] }))
   }
 
   function toggleSettingsSection(key) {
@@ -1019,32 +974,30 @@ export default function App() {
             ) : (
               effectiveVisibleGenerations.map((generation) => {
                 const isGenerationOpen = !!expandedGenerations[generation]
-                const playersInGeneration = treeData[generation] || []
-
                 return (
                   <div key={generation} style={styles.treeGenerationWrap}>
                     <div style={styles.treeGenerationRow}>
                       <button style={styles.treeToggleButton} onClick={() => toggleGenerationOpen(generation)}>
                         {isGenerationOpen ? '▾' : '▸'}
                       </button>
-
                       {editingGeneration === generation ? (
-                        <input
-                          autoFocus
-                          style={styles.generationInlineInput}
-                          value={editingGenerationValue}
-                          onChange={(e) => setEditingGenerationValue(e.target.value)}
-                          onBlur={() => saveEditGeneration(generation)}
-                          onKeyDown={(e) => {
-                            if (e.key === 'Enter') {
-                              saveEditGeneration(generation)
-                            }
-                            if (e.key === 'Escape') {
-                              setEditingGeneration('')
-                              setEditingGenerationValue('')
-                            }
-                          }}
-                        />
+                        <div style={styles.generationEditWrap}>
+                          <input
+                            autoFocus
+                            style={styles.generationInlineInput}
+                            value={editingGenerationValue}
+                            onChange={(e) => setEditingGenerationValue(e.target.value)}
+                            onBlur={() => saveEditGeneration(generation)}
+                            onKeyDown={(e) => {
+                              if (e.key === 'Enter') saveEditGeneration(generation)
+                              if (e.key === 'Escape') {
+                                setEditingGeneration('')
+                                setEditingGenerationValue('')
+                              }
+                            }}
+                          />
+                          <span style={styles.generationSuffix}>世代</span>
+                        </div>
                       ) : (
                         <button
                           style={styles.generationLabelButton}
@@ -1054,15 +1007,14 @@ export default function App() {
                           {generation}
                         </button>
                       )}
-
                       <button style={styles.addInlineButton} onClick={() => setAddPlayerGeneration(generation)}>＋</button>
                     </div>
 
                     {isGenerationOpen && (
                       <div style={styles.treePlayersWrapSingle}>
-                        {playersInGeneration.length === 0 ? (
+                        {(treeData[generation] || []).length === 0 ? (
                           <div style={styles.emptyText}>なし</div>
-                        ) : playersInGeneration.map((player) => (
+                        ) : (treeData[generation] || []).map((player) => (
                           <button
                             key={player.id}
                             onClick={() => {
@@ -1110,6 +1062,20 @@ export default function App() {
                         </label>
                       ))}
                     </div>
+
+                    <div style={styles.settingTitle}>投手・野手</div>
+                    <div style={styles.checkboxGridCompact}>
+                      {TYPE_ORDER.map((type) => (
+                        <label key={type} style={styles.checkboxLabel}>
+                          <input
+                            type="checkbox"
+                            checked={effectiveVisibleTypes.includes(type)}
+                            onChange={() => toggleTypeVisibility(type)}
+                          />
+                          <span>{type}</span>
+                        </label>
+                      ))}
+                    </div>
                   </div>
                 )}
               </div>
@@ -1126,20 +1092,24 @@ export default function App() {
                     <div style={styles.generationSettingList}>
                       {generationOrder.map((generation, index) => (
                         <div key={generation} style={styles.generationSettingRow}>
-                          <input
-                            style={styles.smallInput}
-                            defaultValue={generation.replace(/世代$/, '')}
-                            onBlur={(e) => renameGeneration(generation, e.target.value)}
-                            onKeyDown={(e) => {
-                              if (e.key === 'Enter') {
-                                renameGeneration(generation, e.currentTarget.value)
-                                e.currentTarget.blur()
-                              }
-                            }}
-                          />
+                          <div style={styles.generationInputWrap}>
+                            <input
+                              style={styles.smallInput}
+                              defaultValue={generation.replace(/世代$/, '')}
+                              onBlur={(e) => renameGeneration(generation, e.target.value)}
+                              onKeyDown={(e) => {
+                                if (e.key === 'Enter') {
+                                  renameGeneration(generation, e.currentTarget.value)
+                                  e.currentTarget.blur()
+                                }
+                              }}
+                            />
+                            <span style={styles.generationSuffix}>世代</span>
+                          </div>
                           <div style={styles.generationOrderButtons}>
                             <button style={styles.smallSquareButton} disabled={index === 0} onClick={() => moveGeneration(generation, 'up')}>↑</button>
                             <button style={styles.smallSquareButton} disabled={index === generationOrder.length - 1} onClick={() => moveGeneration(generation, 'down')}>↓</button>
+                            <button style={styles.smallSquareButton} onClick={() => deleteGeneration(generation)}>削</button>
                           </div>
                         </div>
                       ))}
@@ -1242,7 +1212,7 @@ export default function App() {
                   </div>
                   <div style={styles.compactField}>
                     <div style={styles.label}>世代</div>
-                    <select style={styles.smallInput} value={selectedPlayer.generation} onChange={(e) => updatePlayer(selectedPlayer.id, { generation: ensureGenerationLabel(e.target.value) })}>
+                    <select style={styles.smallInput} value={selectedPlayer.generation} onChange={(e) => updatePlayer(selectedPlayer.id, { generation: e.target.value })}>
                       {generationOrder.map((generation) => <option key={generation} value={generation}>{generation}</option>)}
                     </select>
                   </div>
@@ -1260,8 +1230,9 @@ export default function App() {
               </div>
 
               <div style={styles.topContentGrid}>
-                <div style={styles.cardSlimTop}>
-                  <div style={styles.imageStackCompact}>
+                <div style={styles.card}>
+                  <div style={styles.cardTitle}>画像</div>
+                  <div style={styles.imageStack}>
                     <div>
                       <div
                         style={styles.dropAreaSmall}
@@ -1278,9 +1249,9 @@ export default function App() {
                           <div>ここに画像をドラッグ＆ドロップ</div>
                         )}
                       </div>
-                      <div style={styles.imageActionRow}>
+                      <div style={styles.buttonRow}>
                         <input type="file" accept="image/*" onChange={(e) => handleImage(e.target.files?.[0], 'image')} />
-                        <button style={styles.imageDeleteButton} onClick={() => deleteImage('image')}>削除</button>
+                        <button style={styles.button} onClick={() => deleteImage('image')}>画像削除</button>
                       </div>
                     </div>
 
@@ -1301,9 +1272,9 @@ export default function App() {
                             <div>ここに画像をドラッグ＆ドロップ</div>
                           )}
                         </div>
-                        <div style={styles.imageActionRow}>
+                        <div style={styles.buttonRow}>
                           <input type="file" accept="image/*" onChange={(e) => handleImage(e.target.files?.[0], 'subImage')} />
-                          <button style={styles.imageDeleteButton} onClick={() => deleteImage('subImage')}>削除</button>
+                          <button style={styles.button} onClick={() => deleteImage('subImage')}>画像削除</button>
                         </div>
                       </div>
                     )}
@@ -1314,18 +1285,18 @@ export default function App() {
                   <div style={styles.summaryHeaderLeft}>
                     <button style={styles.button} onClick={() => setPeriodIndex((v) => Math.max(0, v - 1))}>← 前の時期</button>
                     <div style={{ fontWeight: 'bold', fontSize: 22 }}>{currentPeriod.label}</div>
-                    <button style={styles.button} onClick={() => setPeriodIndex((v) => Math.min(PERIODS.length - 1, v + 1))}>次の時期 →</button>
+                    <button style={styles.button} onClick={() => setPeriodIndex((v) => Math.min(MONTHS.length - 1, v + 1))}>次の時期 →</button>
                   </div>
 
                   <div style={styles.periodCompactWrap}>
                     {[1, 2, 3].map((grade) => {
-                      const gradePeriods = PERIODS.filter((item) => item.grade === grade)
+                      const gradePeriods = MONTHS.filter((item) => item.grade === grade)
                       return (
                         <div key={grade} style={styles.gradeRow}>
                           <div style={styles.gradeLabel}>{grade}年生</div>
                           <div style={styles.gradeMonthsWrap}>
                             {gradePeriods.map((item) => {
-                              const index = PERIODS.findIndex((x) => x.id === item.id)
+                              const index = MONTHS.findIndex((x) => x.id === item.id)
                               return (
                                 <button
                                   key={item.id}
@@ -1346,150 +1317,102 @@ export default function App() {
                     })}
                   </div>
 
-                  {isGraduation ? (
+                  {playerType === '投手' ? (
                     <>
-                      {playerType === '投手' ? (
-                        <>
-                          <div style={styles.summaryBlockTight}>
-                            <div style={styles.summaryTitle}>通算（{careerPitchingSummary['試合数']}試合・投手）</div>
-                            <div style={styles.summaryLine}>{pitchingLine1(careerPitchingSummary)}</div>
-                            <div style={styles.summaryLine}>{pitchingLine2(careerPitchingSummary)}</div>
-                          </div>
-                          <div style={styles.summaryBlockTight}>
-                            <div style={styles.summaryTitle}>全国大会（{nationalPitchingSummary['試合数']}試合・投手）</div>
-                            <div style={styles.summaryLine}>{pitchingLine1(nationalPitchingSummary)}</div>
-                            <div style={styles.summaryLine}>{pitchingLine2(nationalPitchingSummary)}</div>
-                          </div>
-                          <div style={styles.summaryBlockTight}>
-                            <div style={styles.summaryTitle}>通算（{careerBattingSummary['試合数']}試合・野手）</div>
-                            <div style={styles.summaryLine}>{battingLine1(careerBattingSummary)}</div>
-                            <div style={styles.summaryLine}>{battingLine2(careerBattingSummary)}</div>
-                          </div>
-                          <div style={styles.summaryBlockTight}>
-                            <div style={styles.summaryTitle}>全国大会（{nationalBattingSummary['試合数']}試合・野手）</div>
-                            <div style={styles.summaryLine}>{battingLine1(nationalBattingSummary)}</div>
-                            <div style={styles.summaryLine}>{battingLine2(nationalBattingSummary)}</div>
-                          </div>
-                        </>
-                      ) : (
-                        <>
-                          <div style={styles.summaryBlockTight}>
-                            <div style={styles.summaryTitle}>通算（{careerBattingSummary['試合数']}試合）</div>
-                            <div style={styles.summaryLine}>{battingLine1(careerBattingSummary)}</div>
-                            <div style={styles.summaryLine}>{battingLine2(careerBattingSummary)}</div>
-                          </div>
-                          <div style={styles.summaryBlockTight}>
-                            <div style={styles.summaryTitle}>全国大会（{nationalBattingSummary['試合数']}試合）</div>
-                            <div style={styles.summaryLine}>{battingLine1(nationalBattingSummary)}</div>
-                            <div style={styles.summaryLine}>{battingLine2(nationalBattingSummary)}</div>
-                          </div>
-                        </>
-                      )}
+                      <div style={styles.summaryBlockTight}>
+                        <div style={styles.summaryTitle}>時期合計（{monthPitchingSummary['試合数']}試合・投手）</div>
+                        <div style={styles.summaryLine}>{pitchingLine1(monthPitchingSummary)}</div>
+                        <div style={styles.summaryLine}>{pitchingLine2(monthPitchingSummary)}</div>
+                      </div>
+                      <div style={styles.summaryBlockTight}>
+                        <div style={styles.summaryTitle}>時期合計（{monthBattingSummary['試合数']}試合・野手）</div>
+                        <div style={styles.summaryLine}>{battingLine1(monthBattingSummary)}</div>
+                        <div style={styles.summaryLine}>{battingLine2(monthBattingSummary)}</div>
+                      </div>
+                      <div style={styles.summaryBlockTight}>
+                        <div style={styles.summaryTitle}>通算（{careerPitchingSummary['試合数']}試合・投手）</div>
+                        <div style={styles.summaryLine}>{pitchingLine1(careerPitchingSummary)}</div>
+                        <div style={styles.summaryLine}>{pitchingLine2(careerPitchingSummary)}</div>
+                      </div>
+                      <div style={styles.summaryBlockTight}>
+                        <div style={styles.summaryTitle}>通算（{careerBattingSummary['試合数']}試合・野手）</div>
+                        <div style={styles.summaryLine}>{battingLine1(careerBattingSummary)}</div>
+                        <div style={styles.summaryLine}>{battingLine2(careerBattingSummary)}</div>
+                      </div>
                     </>
                   ) : (
                     <>
-                      {playerType === '投手' ? (
-                        <>
-                          <div style={styles.summaryBlockTight}>
-                            <div style={styles.summaryTitle}>{getPeriodTitle(currentPeriod)}（{periodPitchingSummary['試合数']}試合・投手）</div>
-                            <div style={styles.summaryLine}>{pitchingLine1(periodPitchingSummary)}</div>
-                            <div style={styles.summaryLine}>{pitchingLine2(periodPitchingSummary)}</div>
-                          </div>
-                          <div style={styles.summaryBlockTight}>
-                            <div style={styles.summaryTitle}>{getPeriodTitle(currentPeriod)}（{periodBattingSummary['試合数']}試合・野手）</div>
-                            <div style={styles.summaryLine}>{battingLine1(periodBattingSummary)}</div>
-                            <div style={styles.summaryLine}>{battingLine2(periodBattingSummary)}</div>
-                          </div>
-                          <div style={styles.summaryBlockTight}>
-                            <div style={styles.summaryTitle}>通算（{careerPitchingSummary['試合数']}試合・投手）</div>
-                            <div style={styles.summaryLine}>{pitchingLine1(careerPitchingSummary)}</div>
-                            <div style={styles.summaryLine}>{pitchingLine2(careerPitchingSummary)}</div>
-                          </div>
-                          <div style={styles.summaryBlockTight}>
-                            <div style={styles.summaryTitle}>通算（{careerBattingSummary['試合数']}試合・野手）</div>
-                            <div style={styles.summaryLine}>{battingLine1(careerBattingSummary)}</div>
-                            <div style={styles.summaryLine}>{battingLine2(careerBattingSummary)}</div>
-                          </div>
-                        </>
-                      ) : (
-                        <>
-                          <div style={styles.summaryBlockTight}>
-                            <div style={styles.summaryTitle}>{getPeriodTitle(currentPeriod)}（{periodBattingSummary['試合数']}試合）</div>
-                            <div style={styles.summaryLine}>{battingLine1(periodBattingSummary)}</div>
-                            <div style={styles.summaryLine}>{battingLine2(periodBattingSummary)}</div>
-                          </div>
-                          <div style={styles.summaryBlockTight}>
-                            <div style={styles.summaryTitle}>通算（{careerBattingSummary['試合数']}試合）</div>
-                            <div style={styles.summaryLine}>{battingLine1(careerBattingSummary)}</div>
-                            <div style={styles.summaryLine}>{battingLine2(careerBattingSummary)}</div>
-                          </div>
-                        </>
-                      )}
+                      <div style={styles.summaryBlockTight}>
+                        <div style={styles.summaryTitle}>時期合計（{monthBattingSummary['試合数']}試合）</div>
+                        <div style={styles.summaryLine}>{battingLine1(monthBattingSummary)}</div>
+                        <div style={styles.summaryLine}>{battingLine2(monthBattingSummary)}</div>
+                      </div>
+                      <div style={styles.summaryBlockTight}>
+                        <div style={styles.summaryTitle}>通算（{careerBattingSummary['試合数']}試合）</div>
+                        <div style={styles.summaryLine}>{battingLine1(careerBattingSummary)}</div>
+                        <div style={styles.summaryLine}>{battingLine2(careerBattingSummary)}</div>
+                      </div>
                     </>
                   )}
                 </div>
               </div>
 
-              {!isGraduation && (
-                <>
-                  <div style={styles.card}>
-                    <div style={styles.sectionHeader}>
-                      <h3 style={styles.sectionTitle}>野手成績入力</h3>
-                      <button style={styles.button} onClick={addBattingGame}>試合追加</button>
+              <div style={styles.card}>
+                <div style={styles.sectionHeader}>
+                  <h3 style={styles.sectionTitle}>野手成績入力</h3>
+                  <button style={styles.button} onClick={addBattingGame}>試合追加</button>
+                </div>
+                <div style={styles.gamesWrap}>
+                  {currentData.battingGames.length === 0 ? (
+                    <div style={styles.emptyText}>まだ入力がありません</div>
+                  ) : currentData.battingGames.map((game, index) => (
+                    <div key={index} style={styles.oneLineGameRow}>
+                      <div style={styles.gameIndex}>#{index + 1}</div>
+                      <MiniCheckField label="出場" checked={!!game.played} onChange={(v) => updateBattingGame(index, 'played', v)} />
+                      <MiniNumberField label="打数" value={game.atBats} onChange={(v) => updateBattingGame(index, 'atBats', v)} />
+                      <MiniNumberField label="安打" value={game.hits} onChange={(v) => updateBattingGame(index, 'hits', v)} />
+                      <MiniNumberField label="二塁打" value={game.doubles} onChange={(v) => updateBattingGame(index, 'doubles', v)} />
+                      <MiniNumberField label="三塁打" value={game.triples} onChange={(v) => updateBattingGame(index, 'triples', v)} />
+                      <MiniNumberField label="本塁打" value={game.homeRuns} onChange={(v) => updateBattingGame(index, 'homeRuns', v)} />
+                      <MiniNumberField label="打点" value={game.rbi} onChange={(v) => updateBattingGame(index, 'rbi', v)} />
+                      <MiniNumberField label="得点" value={game.runs} onChange={(v) => updateBattingGame(index, 'runs', v)} />
+                      <MiniNumberField label="盗塁" value={game.steals} onChange={(v) => updateBattingGame(index, 'steals', v)} />
+                      <MiniNumberField label="失策" value={game.errors} onChange={(v) => updateBattingGame(index, 'errors', v)} />
+                      <MiniNumberField label="四死球" value={game.walks} onChange={(v) => updateBattingGame(index, 'walks', v)} />
+                      <button style={styles.smallDeleteButton} onClick={() => deleteBattingGame(index)}>削除</button>
                     </div>
-                    <div style={styles.gamesWrap}>
-                      {currentData.battingGames.length === 0 ? (
-                        <div style={styles.emptyText}>まだ入力がありません</div>
-                      ) : currentData.battingGames.map((game, index) => (
-                        <div key={index} style={styles.oneLineGameRow}>
-                          <div style={styles.gameIndex}>{currentGameLabels[index] || `#${index + 1}`}</div>
-                          <MiniCheckField label="出場" checked={!!game.played} onChange={(v) => updateBattingGame(index, 'played', v)} />
-                          <MiniNumberField label="打数" value={game.atBats} onChange={(v) => updateBattingGame(index, 'atBats', v)} />
-                          <MiniNumberField label="安打" value={game.hits} onChange={(v) => updateBattingGame(index, 'hits', v)} />
-                          <MiniNumberField label="二塁打" value={game.doubles} onChange={(v) => updateBattingGame(index, 'doubles', v)} />
-                          <MiniNumberField label="三塁打" value={game.triples} onChange={(v) => updateBattingGame(index, 'triples', v)} />
-                          <MiniNumberField label="本塁打" value={game.homeRuns} onChange={(v) => updateBattingGame(index, 'homeRuns', v)} />
-                          <MiniNumberField label="打点" value={game.rbi} onChange={(v) => updateBattingGame(index, 'rbi', v)} />
-                          <MiniNumberField label="得点" value={game.runs} onChange={(v) => updateBattingGame(index, 'runs', v)} />
-                          <MiniNumberField label="盗塁" value={game.steals} onChange={(v) => updateBattingGame(index, 'steals', v)} />
-                          <MiniNumberField label="失策" value={game.errors} onChange={(v) => updateBattingGame(index, 'errors', v)} />
-                          <MiniNumberField label="四死球" value={game.walks} onChange={(v) => updateBattingGame(index, 'walks', v)} />
-                          <button style={styles.smallDeleteButton} onClick={() => deleteBattingGame(index)}>削除</button>
-                        </div>
-                      ))}
-                    </div>
-                  </div>
+                  ))}
+                </div>
+              </div>
 
-                  {playerType === '投手' && (
-                    <div style={styles.card}>
-                      <div style={styles.sectionHeader}>
-                        <h3 style={styles.sectionTitle}>投手成績入力</h3>
-                        <button style={styles.button} onClick={addPitchingGame}>試合追加</button>
+              {playerType === '投手' && (
+                <div style={styles.card}>
+                  <div style={styles.sectionHeader}>
+                    <h3 style={styles.sectionTitle}>投手成績入力</h3>
+                    <button style={styles.button} onClick={addPitchingGame}>試合追加</button>
+                  </div>
+                  <div style={styles.gamesWrap}>
+                    {currentData.pitchingGames.length === 0 ? (
+                      <div style={styles.emptyText}>まだ入力がありません</div>
+                    ) : currentData.pitchingGames.map((game, index) => (
+                      <div key={index} style={styles.oneLineGameRow}>
+                        <div style={styles.gameIndex}>#{index + 1}</div>
+                        <MiniCheckField label="登板" checked={!!game.played} onChange={(v) => updatePitchingGame(index, 'played', v)} />
+                        <MiniCheckField label="勝" checked={!!game.win} onChange={(v) => updatePitchingGame(index, 'win', v)} />
+                        <MiniCheckField label="敗" checked={!!game.loss} onChange={(v) => updatePitchingGame(index, 'loss', v)} />
+                        <MiniCheckField label="S" checked={!!game.save} onChange={(v) => updatePitchingGame(index, 'save', v)} />
+                        <MiniNumberField label="投球回" value={game.innings} onChange={(v) => updatePitchingGame(index, 'innings', v)} />
+                        <MiniNumberField label="被安打" value={game.hitsAllowed} onChange={(v) => updatePitchingGame(index, 'hitsAllowed', v)} />
+                        <MiniNumberField label="被本" value={game.homeRunsAllowed} onChange={(v) => updatePitchingGame(index, 'homeRunsAllowed', v)} />
+                        <MiniNumberField label="奪三振" value={game.strikeouts} onChange={(v) => updatePitchingGame(index, 'strikeouts', v)} />
+                        <MiniNumberField label="与四球" value={game.walksAllowed} onChange={(v) => updatePitchingGame(index, 'walksAllowed', v)} />
+                        <MiniNumberField label="失点" value={game.runsAllowed} onChange={(v) => updatePitchingGame(index, 'runsAllowed', v)} />
+                        <MiniNumberField label="自責" value={game.earnedRuns} onChange={(v) => updatePitchingGame(index, 'earnedRuns', v)} />
+                        <button style={styles.smallDeleteButton} onClick={() => deletePitchingGame(index)}>削除</button>
                       </div>
-                      <div style={styles.gamesWrap}>
-                        {currentData.pitchingGames.length === 0 ? (
-                          <div style={styles.emptyText}>まだ入力がありません</div>
-                        ) : currentData.pitchingGames.map((game, index) => (
-                          <div key={index} style={styles.oneLineGameRow}>
-                            <div style={styles.gameIndex}>{currentGameLabels[index] || `#${index + 1}`}</div>
-                            <MiniCheckField label="登板" checked={!!game.played} onChange={(v) => updatePitchingGame(index, 'played', v)} />
-                            <MiniCheckField label="勝" checked={!!game.win} onChange={(v) => updatePitchingGame(index, 'win', v)} />
-                            <MiniCheckField label="敗" checked={!!game.loss} onChange={(v) => updatePitchingGame(index, 'loss', v)} />
-                            <MiniCheckField label="S" checked={!!game.save} onChange={(v) => updatePitchingGame(index, 'save', v)} />
-                            <MiniNumberField label="投球回" value={game.innings} onChange={(v) => updatePitchingGame(index, 'innings', v)} />
-                            <MiniNumberField label="被安打" value={game.hitsAllowed} onChange={(v) => updatePitchingGame(index, 'hitsAllowed', v)} />
-                            <MiniNumberField label="被本" value={game.homeRunsAllowed} onChange={(v) => updatePitchingGame(index, 'homeRunsAllowed', v)} />
-                            <MiniNumberField label="奪三振" value={game.strikeouts} onChange={(v) => updatePitchingGame(index, 'strikeouts', v)} />
-                            <MiniNumberField label="与四球" value={game.walksAllowed} onChange={(v) => updatePitchingGame(index, 'walksAllowed', v)} />
-                            <MiniNumberField label="失点" value={game.runsAllowed} onChange={(v) => updatePitchingGame(index, 'runsAllowed', v)} />
-                            <MiniNumberField label="自責" value={game.earnedRuns} onChange={(v) => updatePitchingGame(index, 'earnedRuns', v)} />
-                            <button style={styles.smallDeleteButton} onClick={() => deletePitchingGame(index)}>削除</button>
-                          </div>
-                        ))}
-                      </div>
-                    </div>
-                  )}
-                </>
+                    ))}
+                  </div>
+                </div>
               )}
             </>
           )}
@@ -1547,13 +1470,13 @@ const styles = {
     fontFamily: 'sans-serif'
   },
   sidebar: {
-    width: 320,
+    width: 340,
     backgroundColor: 'white',
     borderRight: '1px solid #d1d5db',
-    padding: 14,
+    padding: 16,
     boxSizing: 'border-box'
   },
-  sidebarTop: { marginBottom: 10 },
+  sidebarTop: { marginBottom: 12 },
   main: {
     flex: 1,
     padding: 16,
@@ -1573,7 +1496,7 @@ const styles = {
     marginBottom: 10,
   },
   searchRow: {
-    marginBottom: 8,
+    marginBottom: 12,
   },
   modeButton: {
     padding: '8px 12px',
@@ -1612,12 +1535,12 @@ const styles = {
     cursor: 'pointer'
   },
   treeArea: {
-    maxHeight: 'calc(100vh - 210px)',
+    maxHeight: 'calc(100vh - 220px)',
     overflowY: 'auto',
-    paddingRight: 2
+    paddingRight: 4
   },
   treeGenerationWrap: {
-    marginBottom: 6,
+    marginBottom: 8,
   },
   treeGenerationRow: {
     display: 'flex',
@@ -1634,9 +1557,9 @@ const styles = {
     border: 'none',
     backgroundColor: 'transparent',
     cursor: 'pointer',
-    width: 20,
+    width: 22,
     padding: 0,
-    fontSize: 15,
+    fontSize: 16,
   },
   generationLabelButton: {
     border: 'none',
@@ -1644,9 +1567,15 @@ const styles = {
     cursor: 'pointer',
     padding: '4px 0',
     fontWeight: 'bold',
-    fontSize: 17,
+    fontSize: 18,
     flex: 1,
     textAlign: 'left',
+  },
+  generationEditWrap: {
+    flex: 1,
+    display: 'flex',
+    alignItems: 'center',
+    gap: 6,
   },
   generationInlineInput: {
     flex: 1,
@@ -1658,6 +1587,12 @@ const styles = {
     fontSize: 16,
     fontWeight: 'bold',
   },
+  generationSuffix: {
+    fontWeight: 'bold',
+    color: '#374151',
+    flexShrink: 0,
+  },
+  
   addInlineButton: {
     width: 28,
     height: 28,
@@ -1667,7 +1602,6 @@ const styles = {
     cursor: 'pointer',
     fontSize: 18,
     lineHeight: 1,
-    flexShrink: 0,
   },
   playerButton: {
     display: 'block',
@@ -1738,12 +1672,6 @@ const styles = {
   card: {
     backgroundColor: 'white',
     padding: 16,
-    borderRadius: 12,
-    marginBottom: 12
-  },
-  cardSlimTop: {
-    backgroundColor: 'white',
-    padding: 10,
     borderRadius: 12,
     marginBottom: 12
   },
@@ -1831,25 +1759,14 @@ const styles = {
     marginBottom: 12,
     alignItems: 'start',
   },
-  imageStackCompact: {
+  cardTitle: {
+    fontWeight: 'bold',
+    marginBottom: 10,
+    fontSize: 18,
+  },
+  imageStack: {
     display: 'grid',
-    gap: 10,
-  },
-  imageActionRow: {
-    display: 'flex',
-    gap: 8,
-    alignItems: 'center',
-    flexWrap: 'wrap',
-    marginTop: 6,
-  },
-  imageDeleteButton: {
-    padding: '4px 8px',
-    borderRadius: 7,
-    border: '1px solid #d1d5db',
-    backgroundColor: '#f8fafc',
-    cursor: 'pointer',
-    fontSize: 12,
-    color: '#374151',
+    gap: 14,
   },
   dropAreaSmall: {
     height: 260,
@@ -1860,7 +1777,7 @@ const styles = {
     alignItems: 'center',
     backgroundColor: '#f8fafc',
     overflow: 'hidden',
-    marginBottom: 0,
+    marginBottom: 8,
     flexShrink: 0,
   },
   image: {
@@ -1889,7 +1806,7 @@ const styles = {
     borderBottom: '1px solid #e5e7eb',
   },
   gameIndex: {
-    minWidth: 110,
+    minWidth: 32,
     fontWeight: 'bold',
     paddingBottom: 6,
     fontSize: 13,
@@ -1975,6 +1892,11 @@ const styles = {
     gridTemplateColumns: '1fr auto',
     gap: 8,
     alignItems: 'center',
+  },
+  generationInputWrap: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: 6,
   },
   generationOrderButtons: {
     display: 'flex',
