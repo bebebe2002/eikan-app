@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import { supabase } from './supabase'
 
-const STORAGE_KEY = 'eikan-file-manager-v12'
+const STORAGE_KEY = 'eikan-file-manager-v13'
 const APP_STATE_ID = '11111111-1111-1111-1111-111111111111'
 const AUTH_KEY = 'eikan-auth-ok'
 const AUTH_PASSWORD = 'nagata'
@@ -212,8 +212,8 @@ function migratePlayer(player) {
 function normalizeSettings(rawSettings = {}, players = []) {
   const merged = { ...DEFAULT_SETTINGS, ...(rawSettings || {}) }
   const playerGenerations = Array.from(new Set(players.map((p) => ensureGenerationLabel(p.generation)).filter(Boolean)))
-  const baseOrder = Array.isArray(merged.generationOrder) ? merged.generationOrder.map(ensureGenerationLabel) : []
-  const generationOrder = [...baseOrder.filter(Boolean)]
+  const baseOrder = Array.isArray(merged.generationOrder) ? merged.generationOrder.map(ensureGenerationLabel).filter(Boolean) : []
+  const generationOrder = [...baseOrder]
 
   for (const generation of playerGenerations) {
     if (!generationOrder.includes(generation)) generationOrder.push(generation)
@@ -547,6 +547,9 @@ export default function App() {
       setPlayers(loaded.players)
       setSettings(loaded.settings)
       setSelectedPlayerId(loaded.players[0]?.id || '')
+      setExpandedGenerations(
+        Object.fromEntries((loaded.settings.generationOrder || []).map((g) => [g, true]))
+      )
     }
     init()
   }, [])
@@ -555,31 +558,31 @@ export default function App() {
     const playerGenerations = Array.from(new Set(players.map((p) => ensureGenerationLabel(p.generation)).filter(Boolean)))
 
     setSettings((prev) => {
-      const nextOrder = [...(Array.isArray(prev.generationOrder) ? prev.generationOrder.map(ensureGenerationLabel) : [])]
+      const nextOrder = [...(Array.isArray(prev.generationOrder) ? prev.generationOrder.map(ensureGenerationLabel).filter(Boolean) : [])]
+
       for (const generation of playerGenerations) {
         if (!nextOrder.includes(generation)) nextOrder.push(generation)
       }
 
-      const cleanedOrder = nextOrder.filter((generation) => generation.trim() !== '')
-      const currentVisible = Array.isArray(prev.visibleGenerations) ? prev.visibleGenerations.map(ensureGenerationLabel) : []
+      const nextVisible = Array.isArray(prev.visibleGenerations)
+        ? prev.visibleGenerations.map(ensureGenerationLabel).filter(Boolean)
+        : []
 
-      for (const generation of cleanedOrder) {
-        if (!currentVisible.includes(generation)) currentVisible.push(generation)
+      for (const generation of nextOrder) {
+        if (!nextVisible.includes(generation)) nextVisible.push(generation)
       }
 
-      const cleanedVisible = currentVisible.filter((generation) => cleanedOrder.includes(generation))
-
       if (
-        JSON.stringify(cleanedOrder) === JSON.stringify(prev.generationOrder) &&
-        JSON.stringify(cleanedVisible) === JSON.stringify(prev.visibleGenerations)
+        JSON.stringify(nextOrder) === JSON.stringify(prev.generationOrder) &&
+        JSON.stringify(nextVisible) === JSON.stringify(prev.visibleGenerations)
       ) {
         return prev
       }
 
       return {
         ...prev,
-        generationOrder: cleanedOrder,
-        visibleGenerations: cleanedVisible,
+        generationOrder: nextOrder,
+        visibleGenerations: nextVisible,
       }
     })
   }, [players])
@@ -712,15 +715,18 @@ export default function App() {
     const rawName = window.prompt('世代名を入力してください', '新しい世代')
     const name = ensureGenerationLabel(rawName)
     if (!name) return
+
     if (generationOrder.includes(name)) {
       alert('同じ世代名があります')
       return
     }
+
     setSettings((prev) => ({
       ...prev,
       generationOrder: [...(prev.generationOrder || []), name],
       visibleGenerations: [...(prev.visibleGenerations || []), name],
     }))
+
     setExpandedGenerations((prev) => ({ ...prev, [name]: true }))
   }
 
@@ -739,6 +745,7 @@ export default function App() {
       delete next[generation]
       return next
     })
+
     if (selectedPlayer?.generation === generation) {
       setSelectedPlayerId('')
     }
@@ -975,16 +982,22 @@ export default function App() {
 
   const treeData = useMemo(() => {
     const map = {}
+
     for (const generation of effectiveVisibleGenerations) {
       map[generation] = []
     }
+
     for (const player of filteredPlayers) {
-      if (!map[player.generation]) map[player.generation] = []
+      if (!map[player.generation]) {
+        map[player.generation] = []
+      }
       map[player.generation].push(player)
     }
+
     for (const generation of Object.keys(map)) {
       map[generation] = sortPlayersForTree(map[generation])
     }
+
     return map
   }, [filteredPlayers, effectiveVisibleGenerations])
 
