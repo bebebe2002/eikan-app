@@ -212,8 +212,8 @@ function migratePlayer(player) {
 function normalizeSettings(rawSettings = {}, players = []) {
   const merged = { ...DEFAULT_SETTINGS, ...(rawSettings || {}) }
   const playerGenerations = Array.from(new Set(players.map((p) => ensureGenerationLabel(p.generation)).filter(Boolean)))
-  const baseOrder = Array.isArray(merged.generationOrder) ? merged.generationOrder.map(ensureGenerationLabel).filter(Boolean) : []
-  const generationOrder = [...baseOrder]
+  const baseOrder = Array.isArray(merged.generationOrder) ? merged.generationOrder.map(ensureGenerationLabel) : []
+  const generationOrder = [...baseOrder.filter(Boolean)]
 
   for (const generation of playerGenerations) {
     if (!generationOrder.includes(generation)) generationOrder.push(generation)
@@ -221,7 +221,7 @@ function normalizeSettings(rawSettings = {}, players = []) {
 
   const visibleGenerations = Array.isArray(merged.visibleGenerations)
     ? merged.visibleGenerations.map(ensureGenerationLabel).filter((g) => generationOrder.includes(g))
-    : generationOrder
+    : [...generationOrder]
 
   return {
     battingSummaryFields: Array.isArray(merged.battingSummaryFields) ? merged.battingSummaryFields : ALL_BATTING_FIELDS,
@@ -547,25 +547,24 @@ export default function App() {
       setPlayers(loaded.players)
       setSettings(loaded.settings)
       setSelectedPlayerId(loaded.players[0]?.id || '')
-      setExpandedGenerations(
-        Object.fromEntries((loaded.settings.generationOrder || []).map((g) => [g, true]))
-      )
     }
     init()
   }, [])
 
   useEffect(() => {
-    const playerGenerations = Array.from(new Set(players.map((p) => ensureGenerationLabel(p.generation)).filter(Boolean)))
+    const playerGenerations = Array.from(
+      new Set(players.map((p) => ensureGenerationLabel(p.generation)).filter(Boolean))
+    )
 
     setSettings((prev) => {
-      const nextOrder = [...(Array.isArray(prev.generationOrder) ? prev.generationOrder.map(ensureGenerationLabel).filter(Boolean) : [])]
+      const nextOrder = [...(Array.isArray(prev.generationOrder) ? prev.generationOrder.map(ensureGenerationLabel) : [])]
 
       for (const generation of playerGenerations) {
         if (!nextOrder.includes(generation)) nextOrder.push(generation)
       }
 
       const nextVisible = Array.isArray(prev.visibleGenerations)
-        ? prev.visibleGenerations.map(ensureGenerationLabel).filter(Boolean)
+        ? [...prev.visibleGenerations.map(ensureGenerationLabel)]
         : []
 
       for (const generation of nextOrder) {
@@ -606,6 +605,7 @@ export default function App() {
       const { error } = await supabase
         .from('app_state')
         .upsert([{ id: APP_STATE_ID, data: payload }], { onConflict: 'id' })
+
       if (error) console.error('Supabase save error:', error)
     }
 
@@ -716,7 +716,7 @@ export default function App() {
     const name = ensureGenerationLabel(rawName)
     if (!name) return
 
-    if (generationOrder.includes(name)) {
+    if ((settings.generationOrder || []).includes(name)) {
       alert('同じ世代名があります')
       return
     }
@@ -735,11 +735,13 @@ export default function App() {
     if (!ok) return
 
     setPlayers((prev) => prev.filter((player) => player.generation !== generation))
+
     setSettings((prev) => ({
       ...prev,
       generationOrder: (prev.generationOrder || []).filter((g) => g !== generation),
       visibleGenerations: (prev.visibleGenerations || []).filter((g) => g !== generation),
     }))
+
     setExpandedGenerations((prev) => {
       const next = { ...prev }
       delete next[generation]
@@ -875,11 +877,13 @@ export default function App() {
 
   function renameGeneration(oldGeneration, nextGenerationRaw) {
     const nextGeneration = ensureGenerationLabel(nextGenerationRaw)
+
     if (!nextGeneration || nextGeneration === oldGeneration) {
       setEditingGeneration('')
       setEditingGenerationValue('')
       return
     }
+
     if (generationOrder.includes(nextGeneration)) {
       alert('同じ世代名があります')
       return
